@@ -1439,13 +1439,16 @@ class MainWindow(QtWidgets.QMainWindow):
 
             self._update_shape_color(shape)
             if shape.group_id is None:
-                r, g, b = shape.fill_color.getRgb()[:3]
-                item.setText(
-                    f"{html.escape(shape.label)} "
-                    f'<font color="#{r:02x}{g:02x}{b:02x}">●</font>'
-                )
+                text = f"{shape.label} [{shape.shape_type}]"
             else:
-                item.setText(f"{shape.label} ({shape.group_id})")
+                text = f"{shape.label} ({shape.group_id}) [{shape.shape_type}]"
+
+            r, g, b = shape.fill_color.getRgb()[:3]
+            item.setText(
+                f"{html.escape(text)}"
+                f'<font color="#{r:02x}{g:02x}{b:02x}">●</font>'
+            )
+
             self.setDirty()
             if self.uniqLabelList.find_label_item(shape.label) is None:
                 self.uniqLabelList.add_label_item(
@@ -1493,9 +1496,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def addLabel(self, shape: Shape):
         if shape.group_id is None:
-            text = f"{shape.label} ({shape.shape_type})"
+            text = f"{shape.label} [{shape.shape_type}]"
         else:
-            text = f"{shape.label} ({shape.group_id})"
+            text = f"{shape.label} ({shape.group_id}) [{shape.shape_type}]"
         label_list_item = LabelListWidgetItem(text, shape)
         self.labelList.addItem(label_list_item)
         if self.uniqLabelList.find_label_item(shape.label) is None:
@@ -1509,7 +1512,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_shape_color(shape)
         r, g, b = shape.fill_color.getRgb()[:3]
         label_list_item.setText(
-            f'{html.escape(text)} <font color="#{r:02x}{g:02x}{b:02x}">●</font>'
+            f'{html.escape(text)}<font color="#{r:02x}{g:02x}{b:02x}">●</font>'
         )
 
     def _update_shape_color(self, shape):
