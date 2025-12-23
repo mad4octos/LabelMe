@@ -425,6 +425,22 @@ class MainWindow(QtWidgets.QMainWindow):
             tip=self.tr("Open prev (hold Ctl+Shift to copy labels)"),
             enabled=False,
         )
+        openNextEntity = action(
+            self.tr("&Next Entity"),
+            self._select_next_entity,
+            shortcuts["open_next_entity"],
+            icon="arrow-fat-right.svg",
+            tip=self.tr("Select next entity"),
+            enabled=False,
+        )
+        openPrevEntity = action(
+            self.tr("&Prev Entity"),
+            self._select_prev_entity,
+            shortcuts["open_prev_entity"],
+            icon="arrow-fat-left.svg",
+            tip=self.tr("Select prev entity"),
+            enabled=False,
+        )
         save = action(
             self.tr("&Save\n"),
             self.saveFile,
@@ -842,6 +858,8 @@ class MainWindow(QtWidgets.QMainWindow):
             brightnessContrast=brightnessContrast,
             openNextImg=openNextImg,
             openPrevImg=openPrevImg,
+            openNextEntity=openNextEntity,
+            openPrevEntity=openPrevEntity
         )
         self.on_shapes_present_actions = (saveAs, hideAll, showAll, toggleAll)
 
@@ -923,6 +941,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 open_,
                 openNextImg,
                 openPrevImg,
+                openNextEntity,
+                openPrevEntity,
                 opendir,
                 self.menus.recentFiles,
                 save,
@@ -2106,6 +2126,95 @@ class MainWindow(QtWidgets.QMainWindow):
         self.fileListWidget.setCurrentRow(row_next)
         self.fileListWidget.repaint()
 
+    def _select_entity_by_offset(self, row_offset: int):
+        """
+        Select an entity in the polygon label list by applying a row offset
+        relative to the current selection.
+        """
+
+        selection_model = self.labelList.selectionModel()
+        current_index = selection_model.currentIndex()
+        row_count = self.labelList._model.rowCount()
+
+        if row_count == 0:
+            self.canvas.deSelectShape()
+            return
+
+        # Determine target row with bounds clamping
+        if current_index.isValid():
+            target_row = max(0, min(current_index.row() + row_offset, row_count - 1))
+        else:
+            target_row = 0
+
+        # Select and scroll to target
+        target_index = self.labelList._model.index(target_row, 0)
+        selection_model.setCurrentIndex(
+            target_index,
+            QtCore.QItemSelectionModel.ClearAndSelect,
+        )
+        self.labelList.scrollTo(target_index)
+
+        # Update canvas selection
+        if target_index.isValid():
+            item = self.labelList._model.itemFromIndex(target_index)
+            shape: Shape = item.shape()
+            self.canvas.selectShapes([shape])
+            return shape
+        else:
+            self.canvas.deSelectShape()
+
+    def _center_content_point(self, shape) -> None:
+        """Center the viewport on the given shape."""
+        rect = shape.boundingRect()
+        center = rect.center()  # unscaled image coordinates
+
+        # Get actual image dimensions from pixmap
+        pixmap = self.canvas.pixmap
+        if pixmap and not pixmap.isNull():
+            image_width = pixmap.width()
+            image_height = pixmap.height()
+        else:
+            # Fallback if no pixmap available
+            image_width = self.canvas.width() / self.canvas.scale
+            image_height = self.canvas.height() / self.canvas.scale
+
+        # Calculate scaled image dimensions
+        scaled_image_width = image_width * self.canvas.scale
+        scaled_image_height = image_height * self.canvas.scale
+
+        # Calculate the offset (padding) where the image starts on the canvas
+        offset_x = (self.canvas.width() - scaled_image_width) / 2
+        offset_y = (self.canvas.height() - scaled_image_height) / 2
+
+        # Convert image coordinates to canvas coordinates
+        canvas_x = offset_x + center.x() * self.canvas.scale
+        canvas_y = offset_y + center.y() * self.canvas.scale
+
+        # Get the visible viewport dimensions
+        hbar = self.scrollBars[Qt.Horizontal]
+        vbar = self.scrollBars[Qt.Vertical]
+        viewport_width = hbar.pageStep()
+        viewport_height = vbar.pageStep()
+
+        # Calculate scroll position to center the point in viewport
+        target_x = canvas_x - viewport_width / 2
+        target_y = canvas_y - viewport_height / 2
+
+        self.setScroll(Qt.Horizontal, target_x)
+        self.setScroll(Qt.Vertical, target_y)
+
+    def _select_next_entity(self, _value=False):
+        """ """
+        shape = self._select_entity_by_offset(1)
+        if shape is not None:
+            self._center_content_point(shape)
+
+    def _select_prev_entity(self, _value=False):
+        """ """
+        shape = self._select_entity_by_offset(-1)
+        if shape is not None:
+            self._center_content_point(shape)
+
     def _open_file_with_dialog(self, _value: bool = False) -> None:
         if not self._can_continue():
             return
@@ -2415,6 +2524,8 @@ class MainWindow(QtWidgets.QMainWindow):
         """ """
         self.actions.openNextImg.setEnabled(True)
         self.actions.openPrevImg.setEnabled(True)
+        self.actions.openNextEntity.setEnabled(True)
+        self.actions.openPrevEntity.setEnabled(True)
 
         if not self._can_continue():
             return
