@@ -16,6 +16,7 @@ from supervision.dataset.formats.yolo import _polygons_to_masks
 from supervision.dataset.utils import  mask_to_rle
 from labelme import __version__
 from labelme import utils
+from labelme._automation import polygon_from_mask
 from labelme.labelme_types import CocoAnnotation, OtherData, ShapeDict, ShapeByAnnIdx, CocoRLE
 from labelme.coco_dataset import LazyCOCODataset
 PIL.Image.MAX_IMAGE_PIXELS = None
