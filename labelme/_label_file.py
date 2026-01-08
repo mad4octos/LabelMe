@@ -1,22 +1,23 @@
 import base64
 import builtins
 import contextlib
+from copy import deepcopy
 import io
 import json
 import os.path as osp
-from typing import Optional
-from typing import TypedDict
+from typing import Optional, Literal
 
 import numpy as np
 import PIL.Image
 from loguru import logger
 from numpy.typing import NDArray
 from supervision.detection.core import Detections
-
+from supervision.dataset.formats.yolo import _polygons_to_masks
+from supervision.dataset.utils import  mask_to_rle
 from labelme import __version__
 from labelme import utils
-from labelme._automation import polygon_from_mask
-
+from labelme.labelme_types import CocoAnnotation, OtherData, ShapeDict, ShapeByAnnIdx, CocoRLE
+from labelme.coco_dataset import LazyCOCODataset
 PIL.Image.MAX_IMAGE_PIXELS = None
 
 
@@ -28,21 +29,34 @@ def open(name, mode):
     return
 
 
-class ShapeDict(TypedDict):
-    label: str
-    points: list[list[float]]
-    shape_type: str
-    flags: dict[str, bool]
-    description: str
-    group_id: Optional[int]
-    mask: Optional[NDArray[np.bool]]
-    other_data: dict
-
-
-def _get_shapes_from_coco(
-    detections: Detections, classes_names: list[str], mask=False
+def convert_coco_detections_to_shapes(
+    detections: Detections,
+    classes_names: list[str],
+    image_annotations: list[CocoAnnotation],
+    mask=False,
 ) -> list[ShapeDict]:
-    """ """
+    """Convert COCO detections to labelme shape dictionaries.
+
+    Parameters
+    ----------
+    detections : Detections
+        Detection results containing bounding boxes, class IDs, masks, and
+        additional data.
+    classes_names : list[str]
+        List of class names
+    image_annotations : list[CocoAnnotation]
+        Original COCO annotations for the image, used to preserve metadata.
+        Each annotation is paired with the corresponding detection by index.
+    mask : bool, optional
+        If True, create polygon shapes from segmentation masks.
+        If False, create rectangle shapes from bounding boxes
+        (default: False).
+
+    Returns
+    -------
+    list[ShapeDict]
+        List of shape dictionaries compatible with labelme format.
+    """
 
     SHAPE_KEYS: set[str] = {
         "label",
@@ -61,6 +75,16 @@ def _get_shapes_from_coco(
             detections.mask[i][y1:y2, x1:x2]
         )
         polygon_points += [x1, y1]
+
+        # Store original annotation data for reconstruction
+        other_data = {}
+        if image_annotations and i < len(image_annotations):
+            orig_ann = image_annotations[i]
+            other_data: OtherData = {
+                "annotation_index": i,
+                "original_annotation": orig_ann,
+            }
+
         loaded: ShapeDict = ShapeDict(
             label=classes_names[detections.class_id[i]],
             points=polygon_points if mask else [[x1, y1], [x2, y2]],
@@ -69,7 +93,7 @@ def _get_shapes_from_coco(
             description="",
             group_id=int(detections.data["obj_id"][i]),
             mask=None,
-            other_data={},
+            other_data=other_data,
         )
 
         assert set(loaded.keys()) == SHAPE_KEYS | {"other_data"}
@@ -262,6 +286,170 @@ class LabelFile:
             imageWidth = img_arr.shape[1]
         return imageHeight, imageWidth
 
+    @staticmethod
+    def _calculate_bbox_from_points(points: list[list[float]]):
+        """Calculate COCO format bbox [x, y, width, height] from a list of points."""
+        xs = [p[0] for p in points]
+        ys = [p[1] for p in points]
+        bbox_x = round(min(xs), 0)
+        bbox_y = round(min(ys), 0)
+        bbox_width = round(max(xs) - bbox_x, 0)
+        bbox_height = round(max(ys) - bbox_y, 0)
+        return [bbox_x, bbox_y, bbox_width, bbox_height]
+
+    @staticmethod
+    def _get_next_annotation_id(dataset: LazyCOCODataset) -> int:
+        """Find the first available annotation ID."""
+        existing_ids = {
+            ann["id"]
+            for anns in dataset.annotations_by_image_id.values()
+            for ann in anns
+        }
+        ann_id = 1
+        while ann_id in existing_ids:
+            ann_id += 1
+        return ann_id
+
+    @staticmethod
+    def _labelme_polygon_to_coco_format(
+        points: list[list[float]],
+        resolution_wh: tuple[int, int],
+        iscrowd: Literal[0, 1],
+    ) -> tuple[float, CocoRLE | list[list[float]]]:
+        """
+        Convert polygon points to mask and COCO segmentation format.
+
+        Returns:
+            tuple: (area, segmentation) where segmentation is either
+                   RLE format dict (iscrowd=1) or polygon format list (iscrowd=0)
+        """
+        # Convert polygon points to proper format
+        segmentation_polygon = [[float(x), float(y)] for x, y in points]
+
+        # Convert polygon to mask
+        masks = _polygons_to_masks([np.array(segmentation_polygon)], resolution_wh)
+        masks = masks.astype(np.uint8) * 255
+
+        segmentation: CocoRLE | list[list[float]]
+        if iscrowd == 1:
+            # For crowd annotations, use RLE format
+            masks_rle = mask_to_rle(masks[0])
+            masks_rle = list(map(int, masks_rle))
+            segmentation = {
+                "counts": masks_rle,
+                "size": list(masks[0].shape[:2]),
+            }
+        else:
+            # For non-crowd annotations, use polygon format
+            segmentation = [[coord for point in points for coord in point]]
+
+        area = float(np.sum(masks[0] > 0))
+
+        return area, segmentation
+
+    @staticmethod
+    def _process_existing_annotation(
+        shape: dict,
+        shapes_by_annotation_index: dict[int, ShapeByAnnIdx],
+    ) -> None:
+        """Add shape from existing COCO annotation to the grouped index."""
+        ann_index = shape["annotation_index"]
+        original_annotation = shape["original_annotation"]
+
+        if ann_index not in shapes_by_annotation_index:
+            shapes_by_annotation_index[ann_index] = {
+                "annotation": deepcopy(original_annotation),
+                "shapes": [],
+            }
+
+        shapes_by_annotation_index[ann_index]["shapes"].append(shape)
+
+    def _create_new_annotation(
+        self,
+        shape: dict,
+        dataset: LazyCOCODataset,
+        image_id: int,
+        category_name_to_id: dict[str, int],
+        resolution_wh: tuple[int, int],
+        shapes_by_annotation_index: dict[int, ShapeByAnnIdx],
+    ) -> None:
+        """Create a new COCO annotation from a user-drawn shape."""
+        label = shape["label"]
+        points = shape["points"]
+        shape_type = shape["shape_type"]
+        group_id = shape.get("group_id")
+
+        # Validate category
+        if label not in category_name_to_id:
+            logger.warning(f"Label '{label}' not found in COCO categories, skipping")
+            return
+
+        # Validate shape type
+        if shape_type not in ["rectangle", "polygon"]:
+            logger.warning(
+                f"Shape type '{shape_type}' not supported for COCO export, skipping"
+            )
+            return
+
+        # Create base annotation
+        bbox = self._calculate_bbox_from_points(points)
+        bbox_x, bbox_y, bbox_width, bbox_height = bbox
+        ann_id = self._get_next_annotation_id(dataset)
+
+        coco_annotation = CocoAnnotation(
+            id=ann_id,
+            image_id=image_id,
+            category_id=category_name_to_id[label],
+            area=round(bbox_width * bbox_height, 0),
+            bbox=[bbox_x, bbox_y, bbox_width, bbox_height],
+            iscrowd=1,
+            attributes={"ObjID": group_id if group_id is not None else -1},
+        )
+
+        # Add segmentation for polygons
+        if shape_type == "polygon":
+            area, segmentation = self._labelme_polygon_to_coco_format(
+                points, resolution_wh, iscrowd=1
+            )
+            coco_annotation["segmentation"] = segmentation
+            coco_annotation["area"] = area
+
+        shapes_by_annotation_index[ann_id] = {
+            "annotation": coco_annotation,
+            "shapes": [shape],
+        }
+
+    def _update_annotation_from_shapes(
+        self,
+        ann_data: ShapeByAnnIdx,
+        resolution_wh: tuple[int, int],
+    ) -> CocoAnnotation:
+        """Update COCO annotation from edited Labelme shapes (bbox and mask)."""
+        annotation = ann_data["annotation"]
+
+        # Find both rectangle and polygon shapes
+        shapes_by_type = {shape["shape_type"]: shape for shape in ann_data["shapes"]}
+        rectangle_shape = shapes_by_type.get("rectangle")
+        polygon_shape = shapes_by_type.get("polygon")
+
+        # Update bbox from rectangle shape (if exists)
+        if rectangle_shape:
+            annotation["bbox"] = self._calculate_bbox_from_points(
+                rectangle_shape["points"]
+            )
+
+        # Update segmentation from polygon shape (if exists)
+        if polygon_shape and "segmentation" in annotation:
+            points = polygon_shape["points"]
+            iscrowd = annotation.get("iscrowd", 0)
+            area, segmentation = self._labelme_polygon_to_coco_format(
+                points, resolution_wh, iscrowd
+            )
+            annotation["area"] = area
+            annotation["segmentation"] = segmentation
+
+        return annotation
+
     def save(
         self,
         filename,
@@ -300,6 +488,63 @@ class LabelFile:
             self.filename = filename
         except Exception as e:
             raise LabelFileError(e)
+
+    def _sync_labelme_shapes_to_coco_dataset(
+        self,
+        dataset: LazyCOCODataset,
+        image_id: int,
+        shapes: list[dict],
+        im_height: int,
+        im_width: int,
+        imageData,
+    ):
+        """Convert Labelme shapes to COCO annotations and update the dataset."""
+        imageData = base64.b64encode(imageData).decode("utf-8")
+        im_height, im_width = self._check_image_height_and_width(
+            imageData, im_height, im_width
+        )
+
+        resolution_wh = (im_width, im_height)
+
+        category_name_to_id = {cat["name"]: cat["id"] for cat in dataset.categories}
+
+        # Group Labelme shapes by annotation index.
+        # Each COCO annotation produces two Labelme shapes: rectangle (bbox) and
+        # polygon (mask). Both Labelme shapes share the same annotation_index and
+        # represent different aspects of the same COCO annotation. We group them to
+        # reconstruct the COCO annotation while allowing independent editing of bbox
+        # and mask in Labelme.
+        shapes_by_annotation_index: dict[int, ShapeByAnnIdx] = {}
+        for shape in shapes:
+            original_annotation = shape.get("original_annotation")
+
+            # Preserve existing COCO annotations (loaded from dataset)
+            if original_annotation is not None:
+                self._process_existing_annotation(shape, shapes_by_annotation_index)
+
+            # Create new COCO annotation from user-drawn Labelme shape
+            else:
+                self._create_new_annotation(
+                    shape,
+                    dataset,
+                    image_id,
+                    category_name_to_id,
+                    resolution_wh,
+                    shapes_by_annotation_index,
+                )
+
+        # Reconstruct COCO annotations from Labelme shapes.
+        # Labelme uses separate rectangle (bbox) and polygon (mask) shapes,
+        # while COCO uses a single annotation with bbox + segmentation fields.
+        # User edits to rectangles/polygons in Labelme are synced back to COCO.
+        new_annotations: list[CocoAnnotation] = []
+        for ann_index in sorted(shapes_by_annotation_index.keys()):
+            ann_data = shapes_by_annotation_index[ann_index]
+            annotation = self._update_annotation_from_shapes(ann_data, resolution_wh)
+            new_annotations.append(annotation)
+
+        # Update the dataset's annotations for this image
+        dataset.annotations_by_image_id[image_id] = new_annotations
 
     @staticmethod
     def is_label_file(filename):

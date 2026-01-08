@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TypedDict, Any, NotRequired
 import enum
 import functools
 import html
@@ -13,7 +12,6 @@ import types
 import typing
 import webbrowser
 
-import cv2
 import imgviz
 import natsort
 import numpy as np
@@ -25,15 +23,6 @@ from PyQt5 import QtGui
 from PyQt5 import QtWidgets
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QMessageBox
-from supervision.utils.file import read_json_file
-from supervision.dataset.formats.coco import (
-    coco_categories_to_classes,
-    build_coco_class_index_mapping,
-    group_coco_annotations_by_image_id,
-    coco_annotations_to_masks
-)
-from supervision.dataset.utils import map_detections_class_id
-from supervision.detection.core import Detections
 
 from labelme import __appname__
 from labelme import __version__
@@ -41,7 +30,7 @@ from labelme._automation import bbox_from_text
 from labelme._label_file import LabelFile
 from labelme._label_file import LabelFileError
 from labelme._label_file import ShapeDict
-from labelme._label_file import _get_shapes_from_coco
+from labelme._label_file import convert_coco_detections_to_shapes
 from labelme.config import get_config
 from labelme.shape import Shape
 from labelme.widgets import AiPromptWidget
@@ -56,146 +45,8 @@ from labelme.widgets import ToolBar
 from labelme.widgets import UniqueLabelQListWidget
 from labelme.widgets import ZoomWidget
 from labelme.widgets import download_ai_model
-
 from . import utils
-
-
-def coco_annotations_to_detections(
-    image_annotations: list[dict],
-    resolution_wh: tuple[int, int],
-    with_masks: bool,
-    use_iscrowd: bool = True,
-) -> Detections:
-    """
-    Modified from supervision.dataset.formats.coco.coco_annotations_to_detections
-    """
-    if not image_annotations:
-        return Detections.empty()
-
-    class_ids = [
-        image_annotation["category_id"] for image_annotation in image_annotations
-    ]
-    xyxy = [image_annotation["bbox"] for image_annotation in image_annotations]
-    xyxy = np.asarray(xyxy)
-    xyxy[:, 2:4] += xyxy[:, 0:2]
-
-    data = dict()
-    if use_iscrowd:
-        iscrowd = [
-            image_annotation["iscrowd"] for image_annotation in image_annotations
-        ]
-        area = [image_annotation["area"] for image_annotation in image_annotations]
-        obj_id = [
-            image_annotation["attributes"]["ObjID"]
-            for image_annotation in image_annotations
-        ]
-        data = dict(
-            iscrowd=np.asarray(iscrowd, dtype=int),
-            area=np.asarray(area, dtype=float),
-            obj_id=np.asarray(obj_id, dtype=int),
-        )
-
-    if with_masks:
-        mask = coco_annotations_to_masks(
-            image_annotations=image_annotations, resolution_wh=resolution_wh
-        )
-    else:
-        mask = None
-
-    return Detections(
-        class_id=np.asarray(class_ids, dtype=int), xyxy=xyxy, mask=mask, data=data
-    )
-
-
-class CocoRLE(TypedDict):
-    counts: list[int]
-    size: list[int]
-
-
-class CocoAnnotation(TypedDict):
-    id: int
-    image_id: int
-    category_id: int
-
-    # Polygon segmentation (iscrowd == 0) OR RLE (iscrowd == 1)
-    segmentation: list[list[float]] | CocoRLE
-
-    area: float
-    bbox: list[float]  # [x, y, width, height]
-    iscrowd: int  # 0 or 1
-
-    # Optional, non-standard COCO field
-    attributes: NotRequired[dict[str, Any]]
-
-
-class CocoFile(TypedDict):
-    images: list[dict]
-    categories: list[dict]
-    annotations: list[CocoAnnotation]
-
-
-class LazyCOCODataset:
-    """ """
-
-    def __init__(self, images_directory_path: Path, annotations_path: Path):
-        """ """
-        self.images_directory_path = images_directory_path
-        self.annotations_path = annotations_path
-
-        self.coco_data: CocoFile = read_json_file(file_path=annotations_path)
-        self.annotations: list[CocoAnnotation] = self.coco_data["annotations"]
-        self._images = self.coco_data["images"]
-        self.categories = self.coco_data["categories"]
-        self.classes = coco_categories_to_classes(coco_categories=self.categories)
-
-        self.annotations_by_image_id: dict[int, list[CocoAnnotation]] = (
-            group_coco_annotations_by_image_id(self.annotations)
-        )
-
-        self.image_filepaths: list[Path] = [
-            images_directory_path / self._images[i]["file_name"]
-            for i in range(len(self))
-        ]
-
-    def __len__(self) -> int:
-        return len(self.coco_data["images"])
-
-    def __iter__(self):
-        for i in range(len(self)):
-            yield self[i]
-
-    def __getitem__(self, idx):
-        """
-        Modified from:
-        https://github.com/roboflow/supervision/blob/a61440ee0b7d8dec9aff2896c78f03fb4f424c49/supervision/dataset/formats/coco.py#L212
-        """
-
-        class_index_mapping = build_coco_class_index_mapping(
-            coco_categories=self.categories, target_classes=self.classes
-        )
-
-        coco_image = self._images[idx]
-        image_name = coco_image["file_name"]
-        image_width = coco_image["width"]
-        image_height = coco_image["height"]
-        image_id = coco_image["id"]
-
-        image_annotations = self.annotations_by_image_id.get(image_id, [])
-
-        detections = coco_annotations_to_detections(
-            image_annotations=image_annotations,
-            resolution_wh=(image_width, image_height),
-            with_masks=True,
-            use_iscrowd=True,
-        )
-
-        annotation = map_detections_class_id(
-            source_to_target_mapping=class_index_mapping, detections=detections
-        )
-
-        image = cv2.imread(str(self.images_directory_path / image_name))
-
-        return image, annotation
+from labelme.coco_dataset import LazyCOCODataset
 
 # FIXME
 # - [medium] Set max zoom value to something big enough for FitWidth/Window
@@ -490,6 +341,15 @@ class MainWindow(QtWidgets.QMainWindow):
             tip=self.tr("Save image data in label file"),
             checkable=True,
             checked=self._config["store_data"],
+        )
+
+        exportCOCO = action(
+            text=self.tr("Export COCO Annotations"),
+            slot=self.exportCOCOAnnotations,
+            shortcut=shortcuts.get("export_coco"),
+            icon="floppy-disk.svg",
+            tip=self.tr("Export annotations to COCO JSON file"),
+            enabled=False,
         )
 
         close = action(
@@ -818,6 +678,7 @@ class MainWindow(QtWidgets.QMainWindow):
             changeOutputDir=changeOutputDir,
             save=save,
             saveAs=saveAs,
+            exportCOCO=exportCOCO,
             open=open_,
             close=close,
             deleteFile=deleteFile,
@@ -950,6 +811,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 saveAuto,
                 changeOutputDir,
                 saveWithImageData,
+                exportCOCO,
                 close,
                 deleteFile,
                 None,
@@ -1634,7 +1496,7 @@ class MainWindow(QtWidgets.QMainWindow):
             item.setCheckState(Qt.Checked if flag else Qt.Unchecked)
             self.flag_widget.addItem(item)  # type: ignore[union-attr]
 
-    def saveLabels(self, filename):
+    def saveLabels(self, filename, coco=False):
         lf = LabelFile()
 
         def format_shape(s):
@@ -1663,21 +1525,36 @@ class MainWindow(QtWidgets.QMainWindow):
             flag = item.checkState() == Qt.Checked
             flags[key] = flag
         try:
-            assert self.imagePath
-            imagePath = osp.relpath(self.imagePath, osp.dirname(filename))
             imageData = self.imageData if self._config["store_data"] else None
-            if osp.dirname(filename) and not osp.exists(osp.dirname(filename)):
-                os.makedirs(osp.dirname(filename))
-            lf.save(
-                filename=filename,
-                shapes=shapes,
-                imagePath=imagePath,
-                imageData=imageData,
-                imageHeight=self.image.height(),
-                imageWidth=self.image.width(),
-                otherData=self._other_data,
-                flags=flags,
-            )
+            image_height = self.image.height()
+            image_width = self.image.width()
+
+            if coco:
+                image_id = self.fileListWidget.currentRow() + 1
+                lf._sync_labelme_shapes_to_coco_dataset(
+                    self.dataset,
+                    image_id,
+                    shapes=shapes,
+                    im_height=image_height,
+                    im_width=image_width,
+                    imageData=imageData,
+                )
+            else:
+                assert self.imagePath
+                imagePath = osp.relpath(self.imagePath, osp.dirname(filename))
+                if osp.dirname(filename) and not osp.exists(osp.dirname(filename)):
+                    os.makedirs(osp.dirname(filename))
+                lf.save(
+                    filename=filename,
+                    shapes=shapes,
+                    imagePath=imagePath,
+                    imageData=imageData,
+                    imageHeight=image_height,
+                    imageWidth=image_width,
+                    otherData=self._other_data,
+                    flags=flags,
+                )
+
             self.labelFile = lf
             items = self.fileListWidget.findItems(self.imagePath, Qt.MatchExactly)
             if len(items) > 0:
@@ -1978,21 +1855,27 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.fileListWidget.currentRow()
             ]
 
+            # Get the original COCO annotations for this image
+            image_id = self.fileListWidget.currentRow() + 1
+            image_annotations = self.dataset.annotations_by_image_id.get(image_id, [])
+
             shapes: list[ShapeDict] = []
 
             # Create a shape for each bounding box
             shapes.extend(
-                _get_shapes_from_coco(
+                convert_coco_detections_to_shapes(
                     detections=self.curr_frame_annotations,
                     classes_names=self.dataset.classes,
+                    image_annotations=image_annotations,
                 )
             )
 
             # Create a shape for each mask
             shapes.extend(
-                _get_shapes_from_coco(
+                convert_coco_detections_to_shapes(
                     detections=self.curr_frame_annotations,
                     classes_names=self.dataset.classes,
+                    image_annotations=image_annotations,
                     mask=True,
                 )
             )
@@ -2276,18 +2159,71 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def saveFile(self, _value=False):
         assert not self.image.isNull(), "cannot save empty image"
-        if self.labelFile:
-            # DL20180323 - overwrite when in directory
-            self._saveFile(self.labelFile.filename)
-        elif self.output_file:
-            self._saveFile(self.output_file)
-            self.close()
+        if isinstance(self.dataset, LazyCOCODataset):
+            self._saveFile(None, coco=True)
         else:
-            self._saveFile(self.saveFileDialog())
+            if self.labelFile:
+                # DL20180323 - overwrite when in directory
+                self._saveFile(self.labelFile.filename)
+            elif self.output_file:
+                self._saveFile(self.output_file)
+                self.close()
+            else:
+                self._saveFile(self.saveFileDialog())
+
 
     def saveFileAs(self, _value=False):
         assert not self.image.isNull(), "cannot save empty image"
         self._saveFile(self.saveFileDialog())
+
+    def exportCOCOAnnotations(self):
+        """Export all annotations to COCO JSON file."""
+
+        if not hasattr(self, "dataset") or not isinstance(
+            self.dataset, LazyCOCODataset
+        ):
+            QMessageBox.warning(
+                self,
+                "Export COCO Annotations",
+                "No COCO dataset loaded. This feature only works when a COCO "
+                "annotations file is loaded.",
+                QMessageBox.Ok,
+            )
+            return
+
+        # Ask user for output path
+        caption = self.tr("Export COCO Annotations")
+        filters = self.tr("JSON files (*.json)")
+        default_path = str(
+            self.dataset.annotations_path.parent
+            / f"{self.dataset.annotations_path.stem}_export.json"
+        )
+
+        filename = QtWidgets.QFileDialog.getSaveFileName(
+            self, caption, default_path, filters
+        )
+
+        if isinstance(filename, tuple):
+            filename = filename[0]
+
+        if not filename:
+            return
+
+        try:
+            self.dataset.export_annotations(Path(filename))
+            QMessageBox.information(
+                self,
+                "Export Successful",
+                f"COCO annotations exported to:\n{filename}",
+                QMessageBox.Ok,
+            )
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Export Failed",
+                f"Failed to export COCO annotations:\n{str(e)}",
+                QMessageBox.Ok,
+            )
 
     def saveFileDialog(self):
         assert self.filename is not None
@@ -2320,10 +2256,13 @@ class MainWindow(QtWidgets.QMainWindow):
             return filename[0]
         return filename
 
-    def _saveFile(self, filename):
-        if filename and self.saveLabels(filename):
-            self.addRecentFile(filename)
-            self.setClean()
+    def _saveFile(self, filename, coco=False):
+        if filename is None and coco:
+            self.saveLabels(filename, coco)
+        else:
+            if filename and self.saveLabels(filename):
+                self.addRecentFile(filename)
+                self.setClean()
 
     def closeFile(self, _value=False):
         if not self._can_continue():
@@ -2478,6 +2417,7 @@ class MainWindow(QtWidgets.QMainWindow):
         
         if images_dir.exists() and annotations_file.exists():
             self.dataset = LazyCOCODataset(images_dir, annotations_file)
+            self.actions.exportCOCO.setEnabled(True)
             self._import_images_from_annotations_file()
         else:
             self._import_images_from_dir(root_dir=targetDirPath)
