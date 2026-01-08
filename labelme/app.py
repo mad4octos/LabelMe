@@ -2259,6 +2259,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _saveFile(self, filename, coco=False):
         if filename is None and coco:
             self.saveLabels(filename, coco)
+            self.setClean()
         else:
             if filename and self.saveLabels(filename):
                 self.addRecentFile(filename)
