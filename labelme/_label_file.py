@@ -103,10 +103,37 @@ def convert_coco_detections_to_shapes(
     results = []
 
     for i, (x1, y1, x2, y2) in enumerate(detections.xyxy.astype(int).tolist()):
-        polygon_points = compute_polygon_from_mask(
-            detections.mask[i][y1:y2, x1:x2]
-        )
-        polygon_points += [x1, y1]
+        # Check if original annotation has polygon segmentation (iscrowd=0)
+        polygon_points = None
+        if mask and image_annotations and i < len(image_annotations):
+            orig_ann = image_annotations[i]
+            if (
+                orig_ann.get("iscrowd") == 0
+                and "segmentation" in orig_ann
+                and isinstance(orig_ann["segmentation"], list)
+            ):
+                # Use original polygon points directly (avoid mask approximation)
+                # COCO polygon format: [[x1, y1, x2, y2, ...], ...]
+                segmentation = orig_ann["segmentation"]
+                if (
+                    segmentation
+                    and isinstance(segmentation[0], list)
+                    and len(segmentation[0]) >= 6
+                ):
+                    # Convert from flat list to numpy array of [x, y] pairs
+                    flat_coords = segmentation[0]
+                    polygon_points = np.array(
+                        [
+                            [flat_coords[j], flat_coords[j + 1]]
+                            for j in range(0, len(flat_coords), 2)
+                        ],
+                        dtype=np.float32,
+                    )
+
+        # Fallback: compute polygon from mask if not available from original annotation
+        if polygon_points is None and mask:
+            polygon_points = compute_polygon_from_mask(detections.mask[i][y1:y2, x1:x2])
+            polygon_points += [x1, y1]
 
         # Store original annotation data for reconstruction
         other_data = {}
