@@ -8,6 +8,8 @@ import os.path as osp
 from typing import Optional, Literal
 
 import numpy as np
+import numpy.typing as npt
+import skimage
 import PIL.Image
 from loguru import logger
 from numpy.typing import NDArray
@@ -28,6 +30,35 @@ def open(name, mode):
     encoding = "utf-8"
     yield builtins.open(name, mode, encoding=encoding)
     return
+
+def compute_polygon_from_mask(
+    mask: npt.NDArray[np.bool_], polygon_approx_tolerance=0.008
+) -> npt.NDArray[np.float32]:
+    """
+    Modified from:
+    labelme._automation.polygon_from_mask.compute_polygon_from_mask
+
+    Changed polygon approx tolerance default from 0.004 to 0.008 to further simplify the
+    recovered polygon.
+    """
+    contours: npt.NDArray[np.float32] = skimage.measure.find_contours(
+        np.pad(mask, pad_width=1)
+    )
+    if len(contours) == 0:
+        logger.warning("No contour found, so returning empty polygon.")
+        return np.empty((0, 2), dtype=np.float32)
+
+    contour: npt.NDArray[np.float32] = max(
+        contours, key=polygon_from_mask._get_contour_length
+    )
+    polygon: npt.NDArray[np.float32] = skimage.measure.approximate_polygon(
+        coords=contour,
+        tolerance=np.ptp(contour, axis=0).max() * polygon_approx_tolerance,
+    )
+    polygon = np.clip(polygon, (0, 0), (mask.shape[0] - 1, mask.shape[1] - 1))
+    polygon = polygon[:-1]  # drop last point that is duplicate of first point
+
+    return polygon[:, ::-1]  # yx -> xy
 
 
 def convert_coco_detections_to_shapes(
@@ -72,7 +103,7 @@ def convert_coco_detections_to_shapes(
     results = []
 
     for i, (x1, y1, x2, y2) in enumerate(detections.xyxy.astype(int).tolist()):
-        polygon_points = polygon_from_mask.compute_polygon_from_mask(
+        polygon_points = compute_polygon_from_mask(
             detections.mask[i][y1:y2, x1:x2]
         )
         polygon_points += [x1, y1]
