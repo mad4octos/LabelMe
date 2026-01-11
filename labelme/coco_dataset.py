@@ -22,9 +22,28 @@ def coco_annotations_to_detections(
     image_annotations: list[dict],
     resolution_wh: tuple[int, int],
     with_masks: bool,
-    use_iscrowd: bool = True,
 ) -> Detections:
     """
+    Convert COCO annotations to Detections object.
+
+    Parameters
+    ----------
+    image_annotations : list[dict]
+        List of COCO annotation dictionaries for a single image.
+    resolution_wh : tuple[int, int]
+        Image resolution as (width, height).
+    with_masks : bool
+        If True, convert COCO segmentation data (polygons or RLE) to binary masks.
+        If False, only bounding boxes are included (mask field will be None).
+
+    Returns
+    -------
+    Detections
+        Detection object with bounding boxes, class IDs, masks (if requested),
+        and additional data (iscrowd, area, obj_id).
+
+    Notes
+    -----
     Modified from supervision.dataset.formats.coco.coco_annotations_to_detections
     """
     if not image_annotations:
@@ -37,21 +56,17 @@ def coco_annotations_to_detections(
     xyxy = np.asarray(xyxy)
     xyxy[:, 2:4] += xyxy[:, 0:2]
 
-    data = dict()
-    if use_iscrowd:
-        iscrowd = [
-            image_annotation["iscrowd"] for image_annotation in image_annotations
-        ]
-        area = [image_annotation["area"] for image_annotation in image_annotations]
-        obj_id = [
-            image_annotation["attributes"]["ObjID"]
-            for image_annotation in image_annotations
-        ]
-        data = dict(
-            iscrowd=np.asarray(iscrowd, dtype=int),
-            area=np.asarray(area, dtype=float),
-            obj_id=np.asarray(obj_id, dtype=int),
-        )
+    iscrowd = [image_annotation["iscrowd"] for image_annotation in image_annotations]
+    area = [image_annotation["area"] for image_annotation in image_annotations]
+    obj_id = [
+        image_annotation["attributes"]["ObjID"]
+        for image_annotation in image_annotations
+    ]
+    data = dict(
+        iscrowd=np.asarray(iscrowd, dtype=int),
+        area=np.asarray(area, dtype=float),
+        obj_id=np.asarray(obj_id, dtype=int),
+    )
 
     if with_masks:
         mask = coco_annotations_to_masks(
@@ -116,7 +131,6 @@ class LazyCOCODataset:
             image_annotations=image_annotations,
             resolution_wh=(image_width, image_height),
             with_masks=True,
-            use_iscrowd=True,
         )
 
         annotation = map_detections_class_id(
