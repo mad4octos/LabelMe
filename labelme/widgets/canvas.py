@@ -699,9 +699,15 @@ class Canvas(QtWidgets.QWidget):
             assert self.hShape is not None
             self.hShape.highlightVertex(i=self.hVertex, action=self.hShape.MOVE_VERTEX)
         else:
+            # Prioritize polygons over other shapes when selecting
+            visible_shapes = [s for s in self.shapes if self.isVisible(s)]
+            polygons = [s for s in visible_shapes if s.shape_type == "polygon"]
+            others = [s for s in visible_shapes if s.shape_type != "polygon"]
+            shapes_to_check = list(reversed(polygons)) + list(reversed(others))
+
             shape: Shape
-            for shape in reversed(self.shapes):
-                if self.isVisible(shape) and shape.containsPoint(point):
+            for shape in shapes_to_check:
+                if shape.containsPoint(point):
                     self.setHiding()
                     if shape not in self.selectedShapes:
                         if multiple_selection_mode:
