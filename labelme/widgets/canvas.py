@@ -438,11 +438,20 @@ class Canvas(QtWidgets.QWidget):
         # - Highlight vertex
         # Update shape/vertex fill and tooltip value accordingly.
         status_messages: list[str] = []
-        for shape in ([self.hShape] if self.hShape else []) + [
-            s for s in reversed(self.shapes) if self.isVisible(s) and s != self.hShape
-        ]:
-            # Look for a nearby vertex to highlight. If that fails,
-            # check if we happen to be inside a shape.
+        # Prioritize polygon vertices: check polygons first, then other shapes
+        visible_shapes = [
+            s for s in self.shapes if self.isVisible(s) and s != self.hShape
+        ]
+        polygons = [s for s in visible_shapes if s.shape_type == "polygon"]
+        others = [s for s in visible_shapes if s.shape_type != "polygon"]
+        shapes_to_check = (
+            ([self.hShape] if self.hShape else [])
+            + list(reversed(polygons))
+            + list(reversed(others))
+        )
+
+        # First pass: check for vertices and edges (high priority)
+        for shape in shapes_to_check:
             index = shape.nearestVertex(pos, self.epsilon)
             index_edge = shape.nearestEdge(pos, self.epsilon)
             if index is not None:
@@ -472,26 +481,29 @@ class Canvas(QtWidgets.QWidget):
                 status_messages.append(self.tr("ALT + Click to create point on shape"))
                 self.update()
                 break
-            elif shape.containsPoint(pos):
-                if self.selectedVertex() and self.hShape:
-                    self.hShape.highlightClear()
-                self.prevhVertex = self.hVertex
-                self.hVertex = None
-                self.prevhShape = self.hShape = shape
-                self.prevhEdge = self.hEdge
-                self.hEdge = None
-                status_messages.extend(
-                    [
-                        self.tr("Click & drag to move shape"),
-                        self.tr("Right-click & drag to copy shape"),
-                    ]
-                )
-                self.overrideCursor(CURSOR_GRAB)
-                self.update()
-                break
-        else:  # Nothing found, clear highlights, reset state.
-            self.restoreCursor()
-            self.unHighlight()
+        else:
+            # Second pass: check for shape bodies (lower priority)
+            for shape in shapes_to_check:
+                if shape.containsPoint(pos):
+                    if self.selectedVertex() and self.hShape:
+                        self.hShape.highlightClear()
+                    self.prevhVertex = self.hVertex
+                    self.hVertex = None
+                    self.prevhShape = self.hShape = shape
+                    self.prevhEdge = self.hEdge
+                    self.hEdge = None
+                    status_messages.extend(
+                        [
+                            self.tr("Click & drag to move shape"),
+                            self.tr("Right-click & drag to copy shape"),
+                        ]
+                    )
+                    self.overrideCursor(CURSOR_GRAB)
+                    self.update()
+                    break
+            else:  # Nothing found, clear highlights, reset state.
+                self.restoreCursor()
+                self.unHighlight()
         self.vertexSelected.emit(self.hVertex is not None)
         self._update_status(extra_messages=status_messages)
 
