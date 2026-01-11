@@ -461,14 +461,14 @@ class LabelFile:
             category_id=category_name_to_id[label],
             area=round(bbox_width * bbox_height, 0),
             bbox=[bbox_x, bbox_y, bbox_width, bbox_height],
-            iscrowd=1,
+            iscrowd=0,
             attributes={"ObjID": group_id if group_id is not None else -1},
         )
 
         # Add segmentation for polygons
         if shape_type == "polygon":
             area, segmentation = self._labelme_polygon_to_coco_format(
-                points, resolution_wh, iscrowd=1
+                points, resolution_wh, iscrowd=0
             )
             coco_annotation["segmentation"] = segmentation
             coco_annotation["area"] = area
@@ -500,12 +500,13 @@ class LabelFile:
         # Update segmentation from polygon shape (if exists)
         if polygon_shape and "segmentation" in annotation:
             points = polygon_shape["points"]
-            iscrowd = annotation.get("iscrowd", 0)
+            iscrowd = 0
             area, segmentation = self._labelme_polygon_to_coco_format(
-                points, resolution_wh, iscrowd
+                points, resolution_wh, iscrowd=iscrowd
             )
             annotation["area"] = area
             annotation["segmentation"] = segmentation
+            annotation["iscrowd"] = iscrowd
 
         return annotation
 
