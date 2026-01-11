@@ -92,6 +92,7 @@ class Canvas(QtWidgets.QWidget):
                 f"Unexpected value for double_click event: {self.double_click}"
             )
         self.num_backups = kwargs.pop("num_backups", 10)
+        self.bbox_padding = kwargs.pop("bbox_padding", 0)
         self._crosshair = kwargs.pop(
             "crosshair",
             {
@@ -649,6 +650,13 @@ class Canvas(QtWidgets.QWidget):
         if self.movingShape and self.hShape:
             index = self.shapes.index(self.hShape)
             if self.shapesBackups[-1][index].points != self.shapes[index].points:
+                # If a polygon was moved, update rectangles with same group_id
+                if (
+                    self.hShape.shape_type == "polygon"
+                    and self.hShape.group_id is not None
+                ):
+                    self._update_rectangles_for_polygon(self.hShape)
+
                 self.storeShapes()
                 self.shapeMoved.emit()
 
@@ -765,6 +773,39 @@ class Canvas(QtWidgets.QWidget):
         if self.outOfPixmap(pos):
             pos = self.intersectionPoint(point, pos)
         self.hShape.moveVertexBy(i=self.hVertex, offset=pos - point)
+
+    def _update_rectangles_for_polygon(self, polygon: Shape) -> None:
+        """Update rectangle bounding boxes to match polygon bounds with padding."""
+        if polygon.shape_type != "polygon" or polygon.group_id is None:
+            return
+
+        # Calculate the bounding box from polygon points
+        if not polygon.points:
+            return
+
+        min_x = min(p.x() for p in polygon.points)
+        max_x = max(p.x() for p in polygon.points)
+        min_y = min(p.y() for p in polygon.points)
+        max_y = max(p.y() for p in polygon.points)
+
+        # Apply padding
+        min_x -= self.bbox_padding
+        max_x += self.bbox_padding
+        min_y -= self.bbox_padding
+        max_y += self.bbox_padding
+
+        # Update all rectangles with the same group_id
+        for shape in self.shapes:
+            if shape.shape_type == "rectangle" and shape.group_id == polygon.group_id:
+                # IMPORTANT: Modify points in-place to avoid creating empty
+                # intermediate states. Direct assignment (shape.points = [...])
+                # can cause race conditions during mouseMoveEvent processing
+                if len(shape.points) >= 2:
+                    shape.points[0] = QPointF(min_x, min_y)
+                    shape.points[1] = QPointF(max_x, max_y)
+                else:
+                    # Rectangle doesn't have proper points yet, initialize them
+                    shape.points = [QPointF(min_x, min_y), QPointF(max_x, max_y)]
 
     def boundedMoveShapes(self, shapes, pos):
         if self.outOfPixmap(pos):

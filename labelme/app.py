@@ -198,6 +198,7 @@ class MainWindow(QtWidgets.QMainWindow):
             double_click=self._config["canvas"]["double_click"],
             num_backups=self._config["canvas"]["num_backups"],
             crosshair=self._config["canvas"]["crosshair"],
+            bbox_padding=self._config["canvas"]["bbox_padding"],
         )
         self.canvas.zoomRequest.connect(self._zoom_requested)
         self.canvas.mouseMoved.connect(self._update_status_stats)
