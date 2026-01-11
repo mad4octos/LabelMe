@@ -826,8 +826,28 @@ class Canvas(QtWidgets.QWidget):
         # self.calculateOffsets(self.selectedShapes, pos)
         dp = pos - self.prevPoint
         if dp:
+            # Move the selected shapes
             for shape in shapes:
                 shape.moveBy(dp)
+
+            # When moving polygons, also move rectangles with the same group_id
+            # Collect group_ids from polygons being moved
+            polygon_group_ids = {
+                shape.group_id
+                for shape in shapes
+                if shape.shape_type == "polygon" and shape.group_id is not None
+            }
+
+            if polygon_group_ids:
+                # Find and move all rectangles with matching group_ids
+                for shape in self.shapes:
+                    if (
+                        shape not in shapes
+                        and shape.shape_type == "rectangle"
+                        and shape.group_id in polygon_group_ids
+                    ):
+                        shape.moveBy(dp)
+
             self.prevPoint = pos
             return True
         return False
@@ -1114,6 +1134,14 @@ class Canvas(QtWidgets.QWidget):
             if self.movingShape and self.selectedShapes:
                 index = self.shapes.index(self.selectedShapes[0])
                 if self.shapesBackups[-1][index].points != self.shapes[index].points:
+                    # If a polygon was moved, update rectangles with same group_id
+                    moved_shape = self.selectedShapes[0]
+                    if (
+                        moved_shape.shape_type == "polygon"
+                        and moved_shape.group_id is not None
+                    ):
+                        self._update_rectangles_for_polygon(moved_shape)
+
                     self.storeShapes()
                     self.shapeMoved.emit()
 
