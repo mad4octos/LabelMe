@@ -1638,6 +1638,35 @@ class MainWindow(QtWidgets.QMainWindow):
             shape.group_id = group_id
             shape.description = description
             self.addLabel(shape)
+
+            # Automatically create bbox with padding around polygon
+            if shape.shape_type == "polygon" and shape.points:
+                # Calculate bounding box from polygon points
+                xs = [p.x() for p in shape.points]
+                ys = [p.y() for p in shape.points]
+                padding = self._config["canvas"]["bbox_padding"]
+
+                # Create rectangle shape with the same label and group_id
+                bbox_shape = Shape(
+                    label=shape.label,
+                    shape_type="rectangle",
+                    flags=flags,
+                    group_id=shape.group_id,
+                    description=shape.description
+                )
+                bbox_shape.addPoint(
+                    QtCore.QPointF(min(xs) - padding, min(ys) - padding)
+                )
+                bbox_shape.addPoint(
+                    QtCore.QPointF(max(xs) + padding, max(ys) + padding)
+                )
+                bbox_shape.close()
+
+                # Add the bbox to canvas and label list
+                self.canvas.shapes.append(bbox_shape)
+                self.addLabel(bbox_shape)
+                self.canvas.storeShapes()
+
             self.actions.editMode.setEnabled(True)
             self.actions.undoLastPoint.setEnabled(False)
             self.actions.undo.setEnabled(True)
