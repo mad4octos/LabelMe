@@ -4,11 +4,13 @@ from pathlib import Path
 # External imports
 import cv2
 import numpy as np
+import numpy.typing as npt
 from supervision.dataset.formats.coco import build_coco_class_index_mapping
-from supervision.dataset.formats.coco import coco_annotations_to_masks
 from supervision.dataset.formats.coco import coco_categories_to_classes
 from supervision.dataset.formats.coco import group_coco_annotations_by_image_id
 from supervision.dataset.utils import map_detections_class_id
+from supervision.dataset.utils import rle_to_mask
+from supervision.detection.utils.converters import polygon_to_mask
 from supervision.detection.core import Detections
 from supervision.utils.file import read_json_file
 from supervision.utils.file import save_json_file
@@ -79,6 +81,31 @@ def coco_annotations_to_detections(
         class_id=np.asarray(class_ids, dtype=int), xyxy=xyxy, mask=mask, data=data
     )
 
+
+def coco_annotations_to_masks(
+    image_annotations: list[dict], resolution_wh: tuple[int, int]
+) -> npt.NDArray[np.bool_]:
+    masks = []
+    for annotation in image_annotations:
+        if annotation["iscrowd"]:
+            assert isinstance(annotation["segmentation"], dict)
+            rle = np.array(annotation["segmentation"]["counts"])
+            mask = rle_to_mask(rle=rle, resolution_wh=resolution_wh)
+            masks.append(mask)
+        else:
+            if ("segmentation" not in annotation) or not isinstance(
+                annotation["segmentation"], list
+            ):
+                # Create empty mask for annotations without valid segmentation
+                mask = np.zeros((resolution_wh[1], resolution_wh[0]), dtype=np.bool_)
+            else:
+                polygon = np.reshape(
+                    np.asarray(annotation["segmentation"], dtype=np.int32),
+                    (-1, 2),
+                )
+                mask = polygon_to_mask(polygon=polygon, resolution_wh=resolution_wh)
+            masks.append(mask)
+    return np.array(masks, dtype=bool)
 
 class LazyCOCODataset:
     """ """
