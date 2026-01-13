@@ -408,88 +408,113 @@ class LabelFile:
     @staticmethod
     def _process_existing_annotation(
         shape: dict,
-        shapes_by_group_id: dict[int, AnnotationWithShapes],
-    ) -> None:
-        """Add shape from existing COCO annotation to the grouped index."""
+    ) -> tuple[int, AnnotationWithShapes]:
+        """Extract existing COCO annotation from shape."""
         group_id = shape["group_id"]
         original_annotation = shape["original_annotation"]
 
-        if group_id not in shapes_by_group_id:
-            shapes_by_group_id[group_id] = {
-                "annotation": deepcopy(original_annotation),
-                "shapes": [],
-            }
+        annotation_data: AnnotationWithShapes = {
+            "annotation": deepcopy(original_annotation),
+            "shapes": [shape],
+        }
 
-        shapes_by_group_id[group_id]["shapes"].append(shape)
+        return (group_id, annotation_data)
 
-    def _create_new_annotation(
+    def _create_annotation_from_shape_group(
         self,
-        shape: dict,
+        group_shapes: list[dict],
         dataset: LazyCOCODataset,
         image_id: int,
         category_name_to_id: dict[str, int],
         resolution_wh: tuple[int, int],
-        shapes_by_group_id: dict[int, AnnotationWithShapes],
-    ) -> None:
-        """Create a new COCO annotation from a user-drawn shape."""
-        label = shape["label"]
-        points = shape["points"]
-        shape_type = shape["shape_type"]
-        group_id = shape.get("group_id")
+    ) -> tuple[int, AnnotationWithShapes] | None:
+        """Create a COCO annotation from a group of shapes (polygon + rectangle).
 
-        if group_id is None:
-            return
+        Args:
+            group_shapes: List of shapes with the same group_id (polygon and rectangle)
+
+        Returns:
+            Tuple of (annotation_id, annotation_data) or None if validation fails
+        """
+        # Separate shapes by type
+        polygon_shape = None
+        rectangle_shape = None
+
+        for shape in group_shapes:
+            shape_type = shape["shape_type"]
+            if shape_type == "polygon":
+                polygon_shape = shape
+            elif shape_type == "rectangle":
+                rectangle_shape = shape
+
+        # We need at least a polygon to create a valid COCO annotation
+        if polygon_shape is None:
+            logger.warning("No polygon found in shape group, skipping")
+            return None
+
+        label = polygon_shape["label"]
+        group_id = polygon_shape.get("group_id")
 
         # Validate category
         if label not in category_name_to_id:
             logger.warning(f"Label '{label}' not found in COCO categories, skipping")
-            return
+            return None
 
-        # Validate shape type
-        if shape_type not in ["rectangle", "polygon"]:
-            logger.warning(
-                f"Shape type '{shape_type}' not supported for COCO export, skipping"
-            )
-            return
-
-        # Create base annotation
-        bbox = self._calculate_bbox_from_points(points)
-        bbox_x, bbox_y, bbox_width, bbox_height = bbox
         ann_id = self._get_next_annotation_id(dataset)
+
+        # Calculate bbox from rectangle shape if available, else from polygon
+        if rectangle_shape is not None:
+            bbox = self._calculate_bbox_from_points(rectangle_shape["points"])
+        else:
+            bbox = self._calculate_bbox_from_points(polygon_shape["points"])
+
+        bbox_x, bbox_y, bbox_width, bbox_height = bbox
+
+        # Calculate segmentation from polygon
+        area, segmentation = self._labelme_polygon_to_coco_format(
+            polygon_shape["points"], resolution_wh, iscrowd=0
+        )
 
         coco_annotation = CocoAnnotation(
             id=ann_id,
             image_id=image_id,
             category_id=category_name_to_id[label],
-            area=round(bbox_width * bbox_height, 0),
+            area=area,
             bbox=[bbox_x, bbox_y, bbox_width, bbox_height],
             iscrowd=0,
+            segmentation=segmentation,
             attributes={"ObjID": group_id if group_id is not None else -1},
         )
 
-        # Add segmentation for polygons
-        if shape_type == "polygon":
-            area, segmentation = self._labelme_polygon_to_coco_format(
-                points, resolution_wh, iscrowd=0
-            )
-            coco_annotation["segmentation"] = segmentation
-            coco_annotation["area"] = area
-        
-        shapes_by_group_id[group_id] = {
+        annotation_data: AnnotationWithShapes = {
             "annotation": coco_annotation,
-            "shapes": [shape],
+            "shapes": group_shapes,
         }
+
+        return (ann_id, annotation_data)
 
     def _update_annotation_from_shapes(
         self,
         ann_data: AnnotationWithShapes,
         resolution_wh: tuple[int, int],
     ) -> CocoAnnotation:
-        """Update COCO annotation from edited Labelme shapes (bbox and mask)."""
+        """Update COCO annotation from edited Labelme shapes (bbox and mask).
+
+        If both polygon and rectangle shapes exist, the rectangle bbox is computed
+        from the polygon points to ensure it stays centered around the mask.
+        """
         annotation = ann_data["annotation"]
+        shapes = ann_data["shapes"]
 
         # Find both rectangle and polygon shapes
-        shapes_by_type = {shape["shape_type"]: shape for shape in ann_data["shapes"]}
+        shapes_by_type = {}
+        for shape in shapes:
+            shape_type = shape["shape_type"]
+            if shape_type not in shapes_by_type:
+                shapes_by_type[shape_type] = shape
+            else:
+                raise Exception("Problem")
+            
         rectangle_shape = shapes_by_type.get("rectangle")
         polygon_shape = shapes_by_type.get("polygon")
 
@@ -577,23 +602,32 @@ class LabelFile:
         # reconstruct the COCO annotation while allowing independent editing of bbox
         # and mask in Labelme.
         shapes_by_group_id: dict[int, AnnotationWithShapes] = {}
+
         for shape in shapes:
+            if (group_id := shape.get("group_id")) is None:
+                logger.warning("Shape without group_id (ObjId)! Skipping.")
+                continue
             original_annotation = shape.get("original_annotation")
 
             # Preserve existing COCO annotations (loaded from dataset)
             if original_annotation is not None:
-                self._process_existing_annotation(shape, shapes_by_group_id)
-
-            # Create new COCO annotation from user-drawn Labelme shape
+                extracted_group_id, annotation_data = self._process_existing_annotation(shape)
+                
+                if extracted_group_id not in shapes_by_group_id:
+                    shapes_by_group_id[extracted_group_id] = annotation_data
+                else:
+                    shapes_by_group_id[extracted_group_id]["shapes"].append(shape)
+            
+            # New shapes created by user
             else:
-                self._create_new_annotation(
-                    shape,
-                    dataset,
-                    image_id,
-                    category_name_to_id,
-                    resolution_wh,
-                    shapes_by_group_id,
-                )
+                if group_id not in shapes_by_group_id:
+                    # annotation will be created later, using all the shapes associated to this group_id
+                    shapes_by_group_id[group_id] = {
+                        "annotation": None,
+                        "shapes": [shape],
+                    }
+                else:
+                    shapes_by_group_id[group_id]["shapes"].append(shape)
 
         # Reconstruct COCO annotations from Labelme shapes.
         # Labelme uses separate rectangle (bbox) and polygon (mask) shapes,
@@ -602,6 +636,21 @@ class LabelFile:
         new_annotations: list[CocoAnnotation] = []
         for group_id in sorted(shapes_by_group_id.keys()):
             ann_data = shapes_by_group_id[group_id]
+
+            # If annotation doesn't exist (new shape group), create it
+            if ann_data["annotation"] is None:
+                result = self._create_annotation_from_shape_group(
+                    ann_data["shapes"],
+                    dataset,
+                    image_id,
+                    category_name_to_id,
+                    resolution_wh,
+                )
+                if result is None:
+                    continue
+                _, ann_data = result
+
+            # Update annotation from shapes
             annotation = self._update_annotation_from_shapes(ann_data, resolution_wh)
             new_annotations.append(annotation)
 
