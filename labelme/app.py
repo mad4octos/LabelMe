@@ -2020,6 +2020,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._load_file(filename)
 
     def _open_prev_image(self, _value=False) -> None:
+        if not self._can_continue():
+            return
         row_prev: int = self.fileListWidget.currentRow() - 1
         if row_prev < 0:
             logger.debug("there is no prev image")
@@ -2030,6 +2032,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.fileListWidget.repaint()
 
     def _open_next_image(self, _value=False) -> None:
+        if not self._can_continue():
+            return
         row_next: int = self.fileListWidget.currentRow() + 1
         if row_next >= self.fileListWidget.count():
             logger.debug("there is no next image")
