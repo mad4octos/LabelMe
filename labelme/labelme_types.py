@@ -62,7 +62,6 @@ class CocoFile(TypedDict):
 
 
 class OtherData(TypedDict, total=False):
-    annotation_index: int
     original_annotation: CocoAnnotation
 
 

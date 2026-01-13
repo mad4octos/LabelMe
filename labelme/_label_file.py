@@ -140,7 +140,6 @@ def convert_coco_detections_to_shapes(
         if image_annotations and i < len(image_annotations):
             orig_ann = image_annotations[i]
             other_data: OtherData = {
-                "annotation_index": i,
                 "original_annotation": orig_ann,
             }
 
@@ -409,19 +408,19 @@ class LabelFile:
     @staticmethod
     def _process_existing_annotation(
         shape: dict,
-        shapes_by_annotation_index: dict[int, AnnotationWithShapes],
+        shapes_by_group_id: dict[int, AnnotationWithShapes],
     ) -> None:
         """Add shape from existing COCO annotation to the grouped index."""
-        ann_index = shape["annotation_index"]
+        group_id = shape["group_id"]
         original_annotation = shape["original_annotation"]
 
-        if ann_index not in shapes_by_annotation_index:
-            shapes_by_annotation_index[ann_index] = {
+        if group_id not in shapes_by_group_id:
+            shapes_by_group_id[group_id] = {
                 "annotation": deepcopy(original_annotation),
                 "shapes": [],
             }
 
-        shapes_by_annotation_index[ann_index]["shapes"].append(shape)
+        shapes_by_group_id[group_id]["shapes"].append(shape)
 
     def _create_new_annotation(
         self,
@@ -430,13 +429,16 @@ class LabelFile:
         image_id: int,
         category_name_to_id: dict[str, int],
         resolution_wh: tuple[int, int],
-        shapes_by_annotation_index: dict[int, AnnotationWithShapes],
+        shapes_by_group_id: dict[int, AnnotationWithShapes],
     ) -> None:
         """Create a new COCO annotation from a user-drawn shape."""
         label = shape["label"]
         points = shape["points"]
         shape_type = shape["shape_type"]
         group_id = shape.get("group_id")
+
+        if group_id is None:
+            return
 
         # Validate category
         if label not in category_name_to_id:
@@ -472,8 +474,8 @@ class LabelFile:
             )
             coco_annotation["segmentation"] = segmentation
             coco_annotation["area"] = area
-
-        shapes_by_annotation_index[ann_id] = {
+        
+        shapes_by_group_id[group_id] = {
             "annotation": coco_annotation,
             "shapes": [shape],
         }
@@ -568,19 +570,19 @@ class LabelFile:
 
         category_name_to_id = {cat["name"]: cat["id"] for cat in dataset.categories}
 
-        # Group Labelme shapes by annotation index.
+        # Group Labelme shapes by group_id.
         # Each COCO annotation produces two Labelme shapes: rectangle (bbox) and
-        # polygon (mask). Both Labelme shapes share the same annotation_index and
+        # polygon (mask). Both Labelme shapes share the same group_id (ObjID) and
         # represent different aspects of the same COCO annotation. We group them to
         # reconstruct the COCO annotation while allowing independent editing of bbox
         # and mask in Labelme.
-        shapes_by_annotation_index: dict[int, AnnotationWithShapes] = {}
+        shapes_by_group_id: dict[int, AnnotationWithShapes] = {}
         for shape in shapes:
             original_annotation = shape.get("original_annotation")
 
             # Preserve existing COCO annotations (loaded from dataset)
             if original_annotation is not None:
-                self._process_existing_annotation(shape, shapes_by_annotation_index)
+                self._process_existing_annotation(shape, shapes_by_group_id)
 
             # Create new COCO annotation from user-drawn Labelme shape
             else:
@@ -590,7 +592,7 @@ class LabelFile:
                     image_id,
                     category_name_to_id,
                     resolution_wh,
-                    shapes_by_annotation_index,
+                    shapes_by_group_id,
                 )
 
         # Reconstruct COCO annotations from Labelme shapes.
@@ -598,8 +600,8 @@ class LabelFile:
         # while COCO uses a single annotation with bbox + segmentation fields.
         # User edits to rectangles/polygons in Labelme are synced back to COCO.
         new_annotations: list[CocoAnnotation] = []
-        for ann_index in sorted(shapes_by_annotation_index.keys()):
-            ann_data = shapes_by_annotation_index[ann_index]
+        for group_id in sorted(shapes_by_group_id.keys()):
+            ann_data = shapes_by_group_id[group_id]
             annotation = self._update_annotation_from_shapes(ann_data, resolution_wh)
             new_annotations.append(annotation)
 
