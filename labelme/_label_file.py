@@ -19,7 +19,7 @@ from supervision.dataset.utils import  mask_to_rle
 from labelme import __version__
 from labelme import utils
 from labelme._automation import polygon_from_mask
-from labelme.labelme_types import CocoAnnotation, OtherData, ShapeDict, ShapeByAnnIdx, CocoRLE
+from labelme.labelme_types import CocoAnnotation, OtherData, ShapeDict, AnnotationWithShapes, CocoRLE
 from labelme.coco_dataset import LazyCOCODataset
 PIL.Image.MAX_IMAGE_PIXELS = None
 
@@ -409,7 +409,7 @@ class LabelFile:
     @staticmethod
     def _process_existing_annotation(
         shape: dict,
-        shapes_by_annotation_index: dict[int, ShapeByAnnIdx],
+        shapes_by_annotation_index: dict[int, AnnotationWithShapes],
     ) -> None:
         """Add shape from existing COCO annotation to the grouped index."""
         ann_index = shape["annotation_index"]
@@ -430,7 +430,7 @@ class LabelFile:
         image_id: int,
         category_name_to_id: dict[str, int],
         resolution_wh: tuple[int, int],
-        shapes_by_annotation_index: dict[int, ShapeByAnnIdx],
+        shapes_by_annotation_index: dict[int, AnnotationWithShapes],
     ) -> None:
         """Create a new COCO annotation from a user-drawn shape."""
         label = shape["label"]
@@ -480,7 +480,7 @@ class LabelFile:
 
     def _update_annotation_from_shapes(
         self,
-        ann_data: ShapeByAnnIdx,
+        ann_data: AnnotationWithShapes,
         resolution_wh: tuple[int, int],
     ) -> CocoAnnotation:
         """Update COCO annotation from edited Labelme shapes (bbox and mask)."""
@@ -574,7 +574,7 @@ class LabelFile:
         # represent different aspects of the same COCO annotation. We group them to
         # reconstruct the COCO annotation while allowing independent editing of bbox
         # and mask in Labelme.
-        shapes_by_annotation_index: dict[int, ShapeByAnnIdx] = {}
+        shapes_by_annotation_index: dict[int, AnnotationWithShapes] = {}
         for shape in shapes:
             original_annotation = shape.get("original_annotation")
 

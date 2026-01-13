@@ -77,6 +77,6 @@ class ShapeDict(TypedDict):
     other_data: OtherData
 
 
-class ShapeByAnnIdx(TypedDict):
+class AnnotationWithShapes(TypedDict):
     annotation: CocoAnnotation
     shapes: list[ShapeDict]
