@@ -130,6 +130,12 @@ class Canvas(QtWidgets.QWidget):
         self._dragging_start_pos = QPointF()
         self._is_dragging = False
         self._is_dragging_enabled = False
+        # Guided review mode
+        self._review_editing_blocked = False  # Blocks shape editing
+        self._review_highlight_active = False  # Visual dimming
+        self._highlighted_group_id: int | None = None
+        self._dim_opacity = 0.3
+        self._highlight_opacity = 0.4  # Opacity for highlighted shapes in review mode
         # Menus:
         # 0: right-click without selection and dragging of shapes
         # 1: right-click with selection and dragging of shapes
@@ -166,6 +172,23 @@ class Canvas(QtWidgets.QWidget):
     def set_ai_model_name(self, model_name: str) -> None:
         logger.debug("Setting AI model to {!r}", model_name)
         self._ai_model_name = model_name
+
+    def set_review_highlight(
+        self, active: bool, highlighted_group_id: int | None = None
+    ) -> None:
+        """
+        Enable/disable review mode visual feedback (dimming).
+
+        When active, only shapes with highlighted_group_id are fully visible.
+        Other shapes are dimmed.
+        """
+        self._review_highlight_active = active
+        self._highlighted_group_id = highlighted_group_id
+        self.update()
+
+    def set_review_editing_blocked(self, blocked: bool) -> None:
+        """Block/unblock shape editing during review mode."""
+        self._review_editing_blocked = blocked
 
     def _get_ai_model(self) -> osam.types.Model:
         if self._ai_model_cache and self._ai_model_cache.name == self._ai_model_name:
@@ -423,6 +446,8 @@ class Canvas(QtWidgets.QWidget):
 
         # Polygon/Vertex moving.
         if Qt.LeftButton & a0.buttons():
+            if self._review_editing_blocked:
+                return  # Block editing in review mode
             if self.selectedVertex():
                 self.boundedMoveVertex(pos)
                 self.repaint()
@@ -600,12 +625,13 @@ class Canvas(QtWidgets.QWidget):
                         self.drawingPolygon.emit(True)
                         self.update()
             elif self.editing():
-                if self.selectedEdge() and a0.modifiers() == Qt.AltModifier:
-                    self.addPointToEdge()
-                elif self.selectedVertex() and a0.modifiers() == (
-                    Qt.AltModifier | Qt.ShiftModifier
-                ):
-                    self.removeSelectedPoint()
+                if not self._review_editing_blocked:
+                    if self.selectedEdge() and a0.modifiers() == Qt.AltModifier:
+                        self.addPointToEdge()
+                    elif self.selectedVertex() and a0.modifiers() == (
+                        Qt.AltModifier | Qt.ShiftModifier
+                    ):
+                        self.removeSelectedPoint()
 
                 group_mode = int(a0.modifiers()) == Qt.ControlModifier
                 self.selectShapePoint(pos, multiple_selection_mode=group_mode)
@@ -920,7 +946,16 @@ class Canvas(QtWidgets.QWidget):
         for shape in self.shapes:
             if (shape.selected or not self._hideBackround) and self.isVisible(shape):
                 shape.fill = shape.selected or shape == self.hShape
-                shape.paint(p)
+
+                # Apply dimming/highlighting in review mode
+                if self._review_highlight_active:
+                    is_highlighted = shape.group_id == self._highlighted_group_id
+                    p.setOpacity(
+                        self._highlight_opacity if is_highlighted else self._dim_opacity
+                    )
+                    shape.paint(p)
+                else:
+                    shape.paint(p)
         if self.current:
             self.current.paint(p)
             assert len(self.line.points) == len(self.line.point_labels)
@@ -1114,7 +1149,7 @@ class Canvas(QtWidgets.QWidget):
                 self.finalise()
             elif modifiers == Qt.AltModifier:
                 self.snapping = False
-        elif self.editing():
+        elif self.editing() and not self._review_editing_blocked:
             if key == Qt.Key_Up:
                 self.moveByKeyboard(QPointF(0.0, -MOVE_SPEED))
             elif key == Qt.Key_Down:
@@ -1200,6 +1235,31 @@ class Canvas(QtWidgets.QWidget):
     def setShapeVisible(self, shape, value):
         self.visible[shape] = value
         self.update()
+
+    def _draw_review_highlight(self, painter: QtGui.QPainter, shape: Shape) -> None:
+        """Draw a highlight effect around the shape being reviewed."""
+        if not shape.points:
+            return
+        rect = shape.boundingRect()
+        if rect is None:
+            return
+        # Scale rect to screen coordinates
+        scaled_rect = QtCore.QRectF(
+            rect.x() * self.scale,
+            rect.y() * self.scale,
+            rect.width() * self.scale,
+            rect.height() * self.scale,
+        )
+        # Add padding
+        padding = 5
+        scaled_rect.adjust(-padding, -padding, padding, padding)
+
+        pen = QtGui.QPen(QtGui.QColor(255, 215, 0, 200))  # Gold color
+        pen.setWidth(3)
+        pen.setStyle(QtCore.Qt.DashLine)
+        painter.setPen(pen)
+        painter.setBrush(QtCore.Qt.NoBrush)
+        painter.drawRect(scaled_rect)
 
     def overrideCursor(self, cursor):
         if cursor == self._cursor:

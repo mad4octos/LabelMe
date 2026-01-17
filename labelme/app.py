@@ -45,6 +45,10 @@ from labelme.widgets import ToolBar
 from labelme.widgets import UniqueLabelQListWidget
 from labelme.widgets import ZoomWidget
 from labelme.widgets import download_ai_model
+from labelme.widgets.guided_review_widget import GuidedReviewWidget
+from labelme.widgets.guided_review_widget import MissedAnnotationDialog
+from labelme.widgets.guided_review_widget import ReviewSummaryDialog
+from labelme.guided_review_mode import GuidedReviewManager, AnnotationPair
 from . import utils
 from labelme.coco_dataset import LazyCOCODataset
 
@@ -220,6 +224,32 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.setCentralWidget(scrollArea)
 
+        # Guided review mode
+        self._review_manager = GuidedReviewManager(self)
+        self._review_widget = GuidedReviewWidget(self)
+        self.review_dock = QtWidgets.QDockWidget(self.tr("Guided Review"), self)
+        self.review_dock.setObjectName("GuidedReviewDock")
+        self.review_dock.setWidget(self._review_widget)
+        self.review_dock.setVisible(False)
+
+        # Connect review manager signals
+        self._review_manager.reviewModeChanged.connect(self._on_review_mode_changed)
+        self._review_manager.currentPairChanged.connect(self._on_current_pair_changed)
+        self._review_manager.progressUpdated.connect(
+            self._review_widget.update_progress
+        )
+        self._review_manager.frameReviewCompleted.connect(
+            self._on_frame_review_completed
+        )
+
+        # Connect review widget signals
+        self._review_widget.confirmClicked.connect(self._review_confirm)
+        self._review_widget.editClicked.connect(self._review_edit)
+        self._review_widget.deleteClicked.connect(self._review_delete)
+        self._review_widget.exitReviewClicked.connect(self._exit_review_mode)
+        self._review_widget.viewSummaryClicked.connect(self._show_review_summary)
+        self._review_widget.resetFrameClicked.connect(self._reset_frame_review)
+
         features = QtWidgets.QDockWidget.DockWidgetFeatures()
         for dock in ["flag_dock", "label_dock", "shape_dock", "file_dock"]:
             if self._config[dock]["closable"]:
@@ -236,6 +266,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.addDockWidget(Qt.RightDockWidgetArea, self.label_dock)
         self.addDockWidget(Qt.RightDockWidgetArea, self.shape_dock)
         self.addDockWidget(Qt.RightDockWidgetArea, self.file_dock)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.review_dock)
 
         # Actions
         action = functools.partial(utils.newAction, self)
@@ -643,6 +674,53 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._config["canvas"]["fill_drawing"]:
             fill_drawing.trigger()
 
+        toggleGuidedReview = action(
+            self.tr("Guided Review"),
+            self._toggle_guided_review_mode,
+            shortcuts.get("guided_review", "Ctrl+G"),
+            icon="magnifying-glass.svg",
+            tip=self.tr("Toggle guided annotation review mode (Ctrl-G)"),
+            checkable=True,
+            enabled=False,
+        )
+
+        # Guided review mode actions (only active during review)
+        reviewConfirm = action(
+            self.tr("Confirm Annotation"),
+            self._review_confirm,
+            shortcuts.get("review_confirm", "C"),
+            tip=self.tr("Confirm current annotation (C)"),
+            enabled=False,
+        )
+        reviewEdit = action(
+            self.tr("Edit Annotation"),
+            self._review_edit,
+            shortcuts.get("review_edit", "E"),
+            tip=self.tr("Edit current annotation (E)"),
+            enabled=False,
+        )
+        reviewDelete = action(
+            self.tr("Delete Annotation"),
+            self._review_delete,
+            shortcuts.get("review_delete", "Delete"),
+            tip=self.tr("Delete current annotation (Del)"),
+            enabled=False,
+        )
+        reviewExit = action(
+            self.tr("Exit Review"),
+            self._exit_review_mode,
+            shortcuts.get("review_exit", "Escape"),
+            tip=self.tr("Exit guided review mode (Esc)"),
+            enabled=False,
+        )
+        reviewResetFrame = action(
+            self.tr("Reset Frame Review"),
+            self._reset_frame_review,
+            shortcuts.get("review_reset_frame", "R"),
+            tip=self.tr("Reset review progress for current frame (R)"),
+            enabled=False,
+        )
+
         # Label list context menu.
         labelMenu = QtWidgets.QMenu()
         utils.addActions(labelMenu, (edit, delete))
@@ -721,8 +799,27 @@ class MainWindow(QtWidgets.QMainWindow):
             openNextImg=openNextImg,
             openPrevImg=openPrevImg,
             openNextEntity=openNextEntity,
-            openPrevEntity=openPrevEntity
+            openPrevEntity=openPrevEntity,
+            toggleGuidedReview=toggleGuidedReview,
+            reviewConfirm=reviewConfirm,
+            reviewEdit=reviewEdit,
+            reviewDelete=reviewDelete,
+            reviewExit=reviewExit,
+            reviewResetFrame=reviewResetFrame,
         )
+
+        # Add review actions to main window and review widget so shortcuts work
+        # when either window is focused
+        for review_action in (
+            reviewConfirm,
+            reviewEdit,
+            reviewDelete,
+            reviewExit,
+            reviewResetFrame,
+        ):
+            self.addAction(review_action)
+            self._review_widget.addAction(review_action)
+
         self.on_shapes_present_actions = (saveAs, hideAll, showAll, toggleAll)
 
         self.draw_actions: list[tuple[str, QtWidgets.QAction]] = [
@@ -756,6 +853,7 @@ class MainWindow(QtWidgets.QMainWindow):
             createAiPolygonMode,
             createAiMaskMode,
             brightnessContrast,
+            toggleGuidedReview,
         )
         # menu shown at right click
         self.context_menu_actions = (
@@ -924,6 +1022,8 @@ class MainWindow(QtWidgets.QMainWindow):
                     fitWindow,
                     zoom,
                     None,
+                    toggleGuidedReview,
+                    None,
                     selectAiModel,
                     None,
                     ai_prompt_action,
@@ -989,6 +1089,10 @@ class MainWindow(QtWidgets.QMainWindow):
         # or simply:
         # self.restoreGeometry(settings['window/geometry'])
         self.restoreState(state)
+
+        # Ensure review dock is hidden after state restoration
+        # (restoreState may have set it visible from a previous session)
+        self.review_dock.setVisible(False)
 
         if filename:
             if osp.isdir(filename):
@@ -1352,11 +1456,9 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self._can_continue():
             return
 
-        currIndex = self.imageList.index(str(item.text()))
-        if currIndex < len(self.imageList):
-            filename = self.imageList[currIndex]
-            if filename:
-                self._load_file(filename)
+        filepath = item.data(Qt.UserRole)
+        if filepath:
+            self._load_file(filepath)
 
     # React to canvas signals.
     def shapeSelectionChanged(self, selected_shapes):
@@ -1940,6 +2042,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.canvas.setFocus()
         self.show_status_message(self.tr("Loaded %s") % osp.basename(filename))
         logger.debug("loaded file: {!r}", filename)
+
+        # Update guided review for the new frame if review mode is active
+        if self._review_manager.is_active:
+            self._start_guided_review()
+
         return True
 
     def resizeEvent(self, a0: QtGui.QResizeEvent) -> None:
@@ -2019,29 +2126,39 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._can_continue():
             self._load_file(filename)
 
-    def _open_prev_image(self, _value=False) -> None:
+    def _open_adjacent_image(self, direction: int) -> None:
+        """Open the previous or next image in the file list.
+
+        Args:
+            direction: -1 for previous image, +1 for next image.
+        """
+        # _can_continue() must be called BEFORE changing the row, because it may
+        # trigger a save dialog. When saving, currentRow() must still point to
+        # the current image so COCO annotations are saved to the correct index.
         if not self._can_continue():
             return
-        row_prev: int = self.fileListWidget.currentRow() - 1
-        if row_prev < 0:
-            logger.debug("there is no prev image")
+
+        target_row: int = self.fileListWidget.currentRow() + direction
+        if target_row < 0 or target_row >= self.fileListWidget.count():
+            logger.debug("there is no {} image", "prev" if direction < 0 else "next")
             return
 
-        logger.debug("setting current row to {:d}", row_prev)
-        self.fileListWidget.setCurrentRow(row_prev)
+        # Block signals to prevent fileSelectionChanged() from being triggered.
+        # That method also calls _can_continue(), which would show the "Save
+        # annotations?" dialog a second time. Loading is handled directly below.
+        self.fileListWidget.blockSignals(True)
+        self.fileListWidget.setCurrentRow(target_row)
+        self.fileListWidget.blockSignals(False)
         self.fileListWidget.repaint()
+        item = self.fileListWidget.item(target_row)
+        if item and (filepath := item.data(Qt.UserRole)):
+            self._load_file(filepath)
+
+    def _open_prev_image(self, _value=False) -> None:
+        self._open_adjacent_image(-1)
 
     def _open_next_image(self, _value=False) -> None:
-        if not self._can_continue():
-            return
-        row_next: int = self.fileListWidget.currentRow() + 1
-        if row_next >= self.fileListWidget.count():
-            logger.debug("there is no next image")
-            return
-
-        logger.debug("setting current row to {:d}", row_next)
-        self.fileListWidget.setCurrentRow(row_next)
-        self.fileListWidget.repaint()
+        self._open_adjacent_image(+1)
 
     def _select_entity_by_offset(self, row_offset: int):
         """
@@ -2120,17 +2237,307 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setScroll(Qt.Horizontal, target_x)
         self.setScroll(Qt.Vertical, target_y)
 
+    def _zoom_to_shapes(self, shapes: list, padding_factor: float = 0.2) -> None:
+        """
+        Zoom and center the viewport to fit the given shapes.
+
+        Args:
+            shapes: List of Shape objects to fit in view
+            padding_factor: Extra padding around shapes (0.2 = 20% padding)
+        """
+        if not shapes:
+            return
+
+        # Compute combined bounding box of all shapes
+        combined_rect = shapes[0].boundingRect()
+        for shape in shapes[1:]:
+            combined_rect = combined_rect.united(shape.boundingRect())
+
+        # Get viewport dimensions
+        viewport_width = self.centralWidget().width()
+        viewport_height = self.centralWidget().height()
+
+        # Get shape dimensions in image coordinates
+        shape_width = combined_rect.width()
+        shape_height = combined_rect.height()
+
+        if shape_width <= 0 or shape_height <= 0:
+            return
+
+        # Calculate zoom to fit shape with padding
+        padding = 1.0 + padding_factor
+        scale_x = viewport_width / (shape_width * padding)
+        scale_y = viewport_height / (shape_height * padding)
+        target_scale = min(scale_x, scale_y)
+
+        # Convert scale to zoom percentage
+        target_zoom = int(target_scale * 100)
+
+        # Clamp zoom to reasonable bounds
+        min_zoom = 10
+        max_zoom = 500
+        target_zoom = max(min_zoom, min(max_zoom, target_zoom))
+
+        # Set the zoom level
+        self._zoom_mode = _ZoomMode.MANUAL_ZOOM
+        self._set_zoom(target_zoom)
+
+        # Center on the combined bounding box
+        self._center_content_point(shapes[0])
+
     def _select_next_entity(self, _value=False):
         """ """
+        if self._review_manager.is_active:
+            return  # Block entity navigation in review mode
         shape = self._select_entity_by_offset(1)
         if shape is not None:
             self._center_content_point(shape)
 
     def _select_prev_entity(self, _value=False):
         """ """
+        if self._review_manager.is_active:
+            return  # Block entity navigation in review mode
         shape = self._select_entity_by_offset(-1)
         if shape is not None:
             self._center_content_point(shape)
+
+    # ========== Guided Review Mode Methods ==========
+
+    def _toggle_guided_review_mode(self, checked: bool) -> None:
+        """Toggle guided review mode on/off."""
+        if checked:
+            self._start_guided_review()
+        else:
+            self._exit_review_mode()
+
+    def _start_guided_review(self) -> None:
+        """Initialize and start guided review for current frame."""
+        logger.debug("Starting guided review...")
+
+        if not self.canvas.shapes:
+            QMessageBox.information(
+                self,
+                self.tr("No Annotations"),
+                self.tr("No annotations found on this frame to review."),
+            )
+            self.actions.toggleGuidedReview.setChecked(False)
+            return
+
+        success = self._review_manager.start_review(
+            shapes=self.canvas.shapes,
+            filename=self.filename,
+        )
+
+        if not success:
+            QMessageBox.information(
+                self,
+                self.tr("No Annotation Pairs"),
+                self.tr(
+                    "No bbox/polygon pairs with group IDs found.\n"
+                    "Shapes must have a group ID (ObjID) to be reviewed."
+                ),
+            )
+            self.actions.toggleGuidedReview.setChecked(False)
+        else:
+            # Update overall progress when review starts
+            self._update_overall_progress()
+
+    def _exit_review_mode(self) -> None:
+        """Exit guided review mode."""
+        self._review_manager._clear_state()
+        self.actions.toggleGuidedReview.setChecked(False)
+
+    def _on_review_mode_changed(self, active: bool) -> None:
+        """Handle review mode activation/deactivation."""
+        # Enable/disable review shortcut actions
+        self.actions.reviewConfirm.setEnabled(active)
+        self.actions.reviewEdit.setEnabled(active)
+        self.actions.reviewDelete.setEnabled(active)
+        self.actions.reviewExit.setEnabled(active)
+        self.actions.reviewResetFrame.setEnabled(active)
+
+        if active:
+            # Show the review dock and block shape editing
+            self.review_dock.setVisible(True)
+            self.canvas.set_review_editing_blocked(True)
+        else:
+            # Restore normal canvas state
+            self.canvas.set_review_highlight(False)
+            self.canvas.set_review_editing_blocked(False)
+            self.review_dock.setVisible(False)
+
+    def _on_current_pair_changed(self, pair: AnnotationPair | None) -> None:
+        """Handle change to current review pair."""
+        self._review_widget.update_current_pair(pair)
+
+        if pair:
+            # Update canvas highlighting
+            self.canvas.set_review_highlight(True, pair.group_id)
+
+            # Select shapes in the pair
+            self.canvas.selectShapes(pair.shapes)
+
+            # Zoom and center view on the pair
+            if pair.shapes:
+                self._zoom_to_shapes(pair.shapes)
+        else:
+            # Clear visual highlighting but keep editing blocked.
+            # Editing is unblocked when exiting review mode via _on_review_mode_changed
+            self.canvas.set_review_highlight(False)
+            self.canvas.deSelectShape()
+
+    def _on_frame_review_completed(self) -> None:
+        """Handle completion of all pairs on current frame."""
+        # Reset zoom to fit window so user can see the whole picture
+        self.setFitWindow(True)
+
+        # Show missed annotation dialog
+        dialog = MissedAnnotationDialog(self)
+        summary = self._review_manager.get_review_summary()
+        dialog.set_summary(summary)
+
+        # Position dialog in top-right corner, out of the way
+        dialog.adjustSize()
+        main_geo = self.geometry()
+        dialog.move(
+            main_geo.x() + main_geo.width() - dialog.width() - 20,
+            main_geo.y() + 50,
+        )
+
+        if dialog.exec_() == QtWidgets.QDialog.Accepted:
+            # User confirmed no missed annotations - mark frame as completed
+            self._review_manager.complete_frame_review()
+            self._update_overall_progress()
+            self._proceed_to_next_frame_after_review()
+        else:
+            # User wants to add more annotations - exit review mode
+            self._exit_review_mode()
+
+    def _proceed_to_next_frame_after_review(self) -> None:
+        """Save current frame and advance to next."""
+        # Save the current frame
+        if self._is_changed:
+            self.saveFile()
+
+        # Exit current review
+        # TODO: maybe I should refactor this pattern of entering/exiting the review mode between frames
+        self._exit_review_mode()
+
+        # Move to next frame
+        row_next = self.fileListWidget.currentRow() + 1
+        if row_next >= self.fileListWidget.count():
+            QMessageBox.information(
+                self,
+                self.tr("Review Complete"),
+                self.tr("You have reached the last frame."),
+            )
+            return
+
+        self.fileListWidget.setCurrentRow(row_next)
+        self.fileListWidget.repaint()
+
+        # Auto-start review on next frame if it has annotations with group_ids
+        QtCore.QTimer.singleShot(100, self._auto_start_review_if_applicable)
+
+    def _auto_start_review_if_applicable(self) -> None:
+        """Auto-start guided review if current frame has reviewable annotations."""
+        # Check if there are shapes with group_ids
+        has_grouped_shapes = any(
+            shape.group_id is not None for shape in self.canvas.shapes
+        )
+        if has_grouped_shapes:
+            self.actions.toggleGuidedReview.setChecked(True)
+            self._start_guided_review()
+
+    def _review_confirm(self) -> None:
+        """Handle confirm action in review mode."""
+        logger.debug("Confirming review")
+        self._review_manager.confirm_current()
+
+    def _review_edit(self) -> None:
+        """Handle edit action - exits review mode for manual editing."""
+        # Mark as TO_EDIT so we return to this annotation after editing
+        self._review_manager.mark_for_edit()
+
+        # Exit review mode so user can edit freely
+        self._exit_review_mode()
+
+        QMessageBox.information(
+            self,
+            self.tr("Edit Mode"),
+            self.tr(
+                "Review mode paused for editing.\n"
+                "Make your changes, then press Ctrl+G to restart review."
+            ),
+        )
+
+    def _review_delete(self) -> None:
+        """Handle delete action in review mode."""
+        pair = self._review_manager.current_pair
+        if pair:
+            # Delete all shapes in the pair
+            for shape in pair.shapes:
+                if shape in self.canvas.shapes:
+                    self.canvas.shapes.remove(shape)
+                    item = self.labelList.findItemByShape(shape)
+                    if item:
+                        self.labelList.removeItem(item)
+
+            self.canvas.storeShapes()
+            self.setDirty()
+
+        self._review_manager.mark_deleted()
+
+    def _reset_frame_review(self) -> None:
+        """Reset review progress for the current frame."""
+        self._review_manager.reset_frame_review()
+
+    def _get_all_frame_names(self) -> list[str]:
+        """Get list of all frame filenames in the dataset."""
+        return [osp.basename(f) for f in self.imageList]
+
+    def _update_overall_progress(self) -> None:
+        """Update the overall progress display in the review widget."""
+        if not self._review_manager._persistence:
+            return
+
+        all_frames = self._get_all_frame_names()
+        summary = self._review_manager._persistence.get_summary(all_frames)
+        self._review_widget.update_overall_progress(
+            completed=summary["completed"],
+            total=summary["total"],
+        )
+
+    def _show_review_summary(self) -> None:
+        """Show the review summary dialog."""
+        if not self._review_manager._persistence:
+            return
+
+        all_frames = self._get_all_frame_names()
+        summary = self._review_manager._persistence.get_summary(all_frames)
+
+        # Get current frame summary if in review mode
+        current_frame_summary = None
+        if self._review_manager.is_active:
+            current_frame_summary = self._review_manager.get_review_summary()
+
+        # Build frames status list
+        frames_status = []
+        for frame_name in all_frames:
+            frame_state = self._review_manager._persistence.get_frame_state(frame_name)
+            frames_status.append(
+                {
+                    "name": frame_name,
+                    "status": frame_state.status.value,
+                }
+            )
+
+        dialog = ReviewSummaryDialog(
+            summary, current_frame_summary, frames_status, self
+        )
+        dialog.exec_()
+
+    # ========== End Guided Review Mode Methods ==========
 
     def _open_file_with_dialog(self, _value: bool = False) -> None:
         if not self._can_continue():
@@ -2398,6 +2805,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setDirty()
 
     def deleteSelectedShape(self):
+        if self._review_manager.is_active:
+            return  # Use review widget's delete action instead
         yes, no = QtWidgets.QMessageBox.Yes, QtWidgets.QMessageBox.No
         msg = self.tr(
             "You are about to permanently delete {} polygons, proceed anyway?"
@@ -2505,9 +2914,12 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self._can_continue():
             return
 
+        self._review_manager.set_dataset_dir(self.dataset.images_directory_path)
+
         # Populate the sidebar File List
         for im_path in self.dataset.image_filepaths:
-            item = QtWidgets.QListWidgetItem(str(im_path))
+            item = QtWidgets.QListWidgetItem(str(im_path.name))
+            item.setData(Qt.UserRole, str(im_path))
             item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
             if im_path.exists():
                 item.setCheckState(Qt.Checked)
@@ -2523,6 +2935,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         self._prev_opened_dir = root_dir
+        self._review_manager.set_dataset_dir(root_dir)
         self.filename = None
         self.fileListWidget.clear()
 
