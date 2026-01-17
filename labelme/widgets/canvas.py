@@ -368,7 +368,9 @@ class Canvas(QtWidgets.QWidget):
 
         if self._is_dragging:
             self.overrideCursor(CURSOR_GRAB)
-            delta: QPointF = pos - self._dragging_start_pos
+            # Use screen coordinates for consistent panning at any zoom level
+            screen_pos = a0.localPos()
+            delta: QPointF = screen_pos - self._dragging_start_pos
             self.scrollRequest.emit(int(delta.x()), Qt.Horizontal)
             self.scrollRequest.emit(int(delta.y()), Qt.Vertical)
             return
@@ -647,7 +649,8 @@ class Canvas(QtWidgets.QWidget):
             self.prevPoint = pos
         elif a0.button() == Qt.MiddleButton and self._is_dragging_enabled:
             self.overrideCursor(CURSOR_GRAB)
-            self._dragging_start_pos = pos
+            # Store screen coordinates for consistent panning at any zoom level
+            self._dragging_start_pos = a0.localPos()
             self._is_dragging = True
         self._update_status()
 
