@@ -1346,6 +1346,52 @@ class MainWindow(QtWidgets.QMainWindow):
                     return True
         return False
 
+    def validateGroupId(
+        self, group_id: int | None, shape_type: str, exclude_shape=None
+    ) -> tuple[bool, str]:
+        """
+        Validate that a group_id can be assigned to a shape of the given type.
+
+        Rules:
+        - Only one rectangle and one polygon can share the same group_id.
+        - Returns (is_valid, error_message).
+
+        Args:
+            group_id: The group_id to validate (None always passes).
+            shape_type: The shape type being assigned this group_id.
+            exclude_shape: Shape to exclude from validation (for editing).
+        """
+        if group_id is None:
+            return True, ""
+
+        # Count shapes with the same group_id by type
+        rectangle_count = 0
+        polygon_count = 0
+
+        for shape in self.canvas.shapes:
+            if shape.group_id == group_id:
+                # Skip the shape being edited
+                if exclude_shape is not None and shape is exclude_shape:
+                    continue
+                if shape.shape_type == "rectangle":
+                    rectangle_count += 1
+                elif shape.shape_type == "polygon":
+                    polygon_count += 1
+
+        # Check if adding this shape would violate the constraint
+        if shape_type == "rectangle" and rectangle_count >= 1:
+            return False, self.tr(
+                "ObjID {} already has a rectangle. "
+                "Only one rectangle and one polygon can share the same ObjID."
+            ).format(group_id)
+        elif shape_type == "polygon" and polygon_count >= 1:
+            return False, self.tr(
+                "ObjID {} already has a polygon. "
+                "Only one rectangle and one polygon can share the same ObjID."
+            ).format(group_id)
+
+        return True, ""
+
     def _edit_label(self, value=None):
         if not self.canvas.editing():
             return
@@ -1410,6 +1456,17 @@ class MainWindow(QtWidgets.QMainWindow):
                 ),
             )
             return
+
+        # Validate group_id for each shape before applying changes
+        if edit_group_id:
+            for item in items:
+                shape: Shape = item.shape()
+                is_valid, error_msg = self.validateGroupId(
+                    group_id, shape.shape_type, exclude_shape=shape
+                )
+                if not is_valid:
+                    self.errorMessage(self.tr("Invalid ObjID"), error_msg)
+                    return
 
         self.canvas.storeShapes()
         for item in items:
@@ -1737,6 +1794,15 @@ class MainWindow(QtWidgets.QMainWindow):
         if text:
             self.labelList.clearSelection()
             shape = self.canvas.setLastLabel(text, flags)
+
+            # Validate group_id before assignment
+            is_valid, error_msg = self.validateGroupId(group_id, shape.shape_type)
+            if not is_valid:
+                self.errorMessage(self.tr("Invalid ObjID"), error_msg)
+                self.canvas.undoLastLine()
+                self.canvas.shapesBackups.pop()
+                return
+
             shape.group_id = group_id
             shape.description = description
             self.addLabel(shape)
