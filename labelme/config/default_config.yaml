@@ -126,3 +126,10 @@ shortcuts:
   show_all_polygons: null
   hide_all_polygons: null
   toggle_all_polygons: T
+
+  # Guided review mode shortcuts
+  guided_review: Ctrl+G
+  review_confirm: [C, Return]
+  review_edit: E
+  review_delete: Delete
+  review_exit: Escape
