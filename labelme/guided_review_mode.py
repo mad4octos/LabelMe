@@ -96,7 +96,6 @@ class GuidedReviewManager(QtCore.QObject):
                     pair.status = frame_state.annotations[gid_str].status
 
         # Find first pending annotation (skip already reviewed)
-        # TODO: review this
         self._current_index = self._find_first_pending_index()
 
         self._active = True
