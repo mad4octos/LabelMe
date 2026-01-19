@@ -3005,7 +3005,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self._can_continue():
             return
 
-        self._review_manager.set_dataset_dir(self.dataset.images_directory_path)
+        self._review_manager.set_dataset_dir(self.dataset.annotations_file_path.parent)
 
         # Populate the sidebar File List
         for im_path in self.dataset.image_filepaths:
