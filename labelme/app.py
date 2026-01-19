@@ -1486,9 +1486,11 @@ class MainWindow(QtWidgets.QMainWindow):
             self._update_label_list_item_text(item, shape)
 
             # Update paired shape (polygon/rectangle with same group_id)
-            # If the new group_id is None, ignore
-            # If the selected shape's group_id is None, ignore
-            if edit_group_id and original_group_id is not None and group_id is not None:
+            if (
+                shape.group_id is not None
+                and group_id is not None
+                and original_group_id is not None
+            ):
                 paired_type = (
                     "rectangle" if shape.shape_type == "polygon" else "polygon"
                 )
@@ -1498,7 +1500,11 @@ class MainWindow(QtWidgets.QMainWindow):
                         other_shape.group_id == original_group_id
                         and other_shape.shape_type == paired_type
                     ):
-                        other_shape.group_id = group_id
+                        if edit_group_id:
+                            other_shape.group_id = group_id
+                        if edit_text:
+                            other_shape.label = text
+                            self._update_shape_color(other_shape)
                         self._update_label_list_item_text(other_item, other_shape)
                         break
 
