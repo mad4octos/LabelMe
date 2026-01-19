@@ -497,6 +497,7 @@ class LabelFile:
         self,
         ann_data: AnnotationWithShapes,
         resolution_wh: tuple[int, int],
+        category_name_to_id: dict[str, int],
     ) -> CocoAnnotation:
         """Update COCO annotation from edited Labelme shapes (bbox and mask).
 
@@ -534,6 +535,19 @@ class LabelFile:
             annotation["area"] = area
             annotation["segmentation"] = segmentation
             annotation["iscrowd"] = iscrowd
+
+        # Update ObjID and category_id from edited shape (use polygon preferentially)
+        shape_for_updates = polygon_shape or rectangle_shape
+        if shape_for_updates is not None:
+            # Update ObjID from edited group_id
+            group_id = shape_for_updates.get("group_id")
+            if "attributes" in annotation and group_id is not None:
+                annotation["attributes"]["ObjID"] = group_id
+
+            # Update category_id from edited label
+            label = shape_for_updates.get("label")
+            if label is not None and label in category_name_to_id:
+                annotation["category_id"] = category_name_to_id[label]
 
         return annotation
 
@@ -651,7 +665,9 @@ class LabelFile:
                 _, ann_data = result
 
             # Update annotation from shapes
-            annotation = self._update_annotation_from_shapes(ann_data, resolution_wh)
+            annotation = self._update_annotation_from_shapes(
+                ann_data, resolution_wh, category_name_to_id
+            )
             new_annotations.append(annotation)
 
         # Update the dataset's annotations for this image
