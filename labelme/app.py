@@ -1471,6 +1471,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.canvas.storeShapes()
         for item in items:
             shape: Shape = item.shape()  # type: ignore[no-redef]
+            original_group_id = shape.group_id
 
             if edit_text:
                 shape.label = text
@@ -1492,6 +1493,32 @@ class MainWindow(QtWidgets.QMainWindow):
                 f"{html.escape(text)}"
                 f'<font color="#{r:02x}{g:02x}{b:02x}">●</font>'
             )
+
+            # Update paired shape (polygon/rectangle with same group_id)
+            # If the new group_id is None, ignore
+            # If the selected shape's group_id is None, ignore
+            if edit_group_id and original_group_id is not None and group_id is not None:
+                paired_type = (
+                    "rectangle" if shape.shape_type == "polygon" else "polygon"
+                )
+                for other_item in self.labelList:
+                    other_shape: Shape = other_item.shape()
+                    if (
+                        other_shape.group_id == original_group_id
+                        and other_shape.shape_type == paired_type
+                    ):
+                        other_shape.group_id = group_id
+                        other_text = (
+                            f"{other_shape.label} ({other_shape.group_id}) "
+                            f"[{other_shape.shape_type}]"
+                        )
+                        other_r, other_g, other_b = other_shape.fill_color.getRgb()[:3]
+                        other_item.setText(
+                            f"{html.escape(other_text)}"
+                            f'<font color="#{other_r:02x}{other_g:02x}'
+                            f'{other_b:02x}">●</font>'
+                        )
+                        break
 
             self.setDirty()
             if self.uniqLabelList.find_label_item(shape.label) is None:
