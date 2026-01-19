@@ -110,12 +110,12 @@ def coco_annotations_to_masks(
 class LazyCOCODataset:
     """ """
 
-    def __init__(self, images_directory_path: Path, annotations_path: Path):
+    def __init__(self, images_directory_path: Path, annotations_file_path: Path):
         """ """
         self.images_directory_path = images_directory_path
-        self.annotations_path = annotations_path
+        self.annotations_file_path = annotations_file_path
 
-        self.coco_data: CocoFile = read_json_file(file_path=annotations_path)
+        self.coco_data: CocoFile = read_json_file(file_path=annotations_file_path)
         self._images = self.coco_data["images"]
         self.categories = self.coco_data["categories"]
         self.classes = coco_categories_to_classes(coco_categories=self.categories)
@@ -175,11 +175,11 @@ class LazyCOCODataset:
         Parameters
         ----------
         output_path : Path | None
-            Where to save the COCO JSON. Defaults to original annotations_path.
+            Where to save the COCO JSON. Defaults to original annotations_file_path.
         """
 
         if output_path is None:
-            output_path = self.annotations_path
+            output_path = self.annotations_file_path
 
         # Rebuild annotations list from annotations_by_image_id
         all_annotations = []

@@ -2727,8 +2727,8 @@ class MainWindow(QtWidgets.QMainWindow):
         caption = self.tr("Export COCO Annotations")
         filters = self.tr("JSON files (*.json)")
         default_path = str(
-            self.dataset.annotations_path.parent
-            / f"{self.dataset.annotations_path.stem}_export.json"
+            self.dataset.annotations_file_path.parent
+            / f"{self.dataset.annotations_file_path.stem}_export.json"
         )
 
         filename = QtWidgets.QFileDialog.getSaveFileName(
