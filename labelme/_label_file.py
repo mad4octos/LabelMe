@@ -508,16 +508,18 @@ class LabelFile:
         shapes = ann_data["shapes"]
 
         # Find both rectangle and polygon shapes
-        shapes_by_type = {}
+        rectangle_shape = None
+        polygon_shape = None
         for shape in shapes:
             shape_type = shape["shape_type"]
-            if shape_type not in shapes_by_type:
-                shapes_by_type[shape_type] = shape
-            else:
-                raise Exception("Problem")
-            
-        rectangle_shape = shapes_by_type.get("rectangle")
-        polygon_shape = shapes_by_type.get("polygon")
+            if shape_type == "rectangle":
+                if rectangle_shape is not None:
+                    raise Exception("Duplicate rectangle shape found")
+                rectangle_shape = shape
+            elif shape_type == "polygon":
+                if polygon_shape is not None:
+                    raise Exception("Duplicate polygon shape found")
+                polygon_shape = shape
 
         # Update bbox from rectangle shape (if exists)
         if rectangle_shape:
