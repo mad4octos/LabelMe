@@ -1483,16 +1483,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 shape.description = description
 
             self._update_shape_color(shape)
-            if shape.group_id is None:
-                text = f"{shape.label} [{shape.shape_type}]"
-            else:
-                text = f"{shape.label} ({shape.group_id}) [{shape.shape_type}]"
-
-            r, g, b = shape.fill_color.getRgb()[:3]
-            item.setText(
-                f"{html.escape(text)}"
-                f'<font color="#{r:02x}{g:02x}{b:02x}">●</font>'
-            )
+            self._update_label_list_item_text(item, shape)
 
             # Update paired shape (polygon/rectangle with same group_id)
             # If the new group_id is None, ignore
@@ -1508,16 +1499,7 @@ class MainWindow(QtWidgets.QMainWindow):
                         and other_shape.shape_type == paired_type
                     ):
                         other_shape.group_id = group_id
-                        other_text = (
-                            f"{other_shape.label} ({other_shape.group_id}) "
-                            f"[{other_shape.shape_type}]"
-                        )
-                        other_r, other_g, other_b = other_shape.fill_color.getRgb()[:3]
-                        other_item.setText(
-                            f"{html.escape(other_text)}"
-                            f'<font color="#{other_r:02x}{other_g:02x}'
-                            f'{other_b:02x}">●</font>'
-                        )
+                        self._update_label_list_item_text(other_item, other_shape)
                         break
 
             self.setDirty()
@@ -1592,6 +1574,16 @@ class MainWindow(QtWidgets.QMainWindow):
         shape.fill_color = QtGui.QColor(r, g, b, 128)
         shape.select_line_color = QtGui.QColor(255, 255, 255)
         shape.select_fill_color = QtGui.QColor(r, g, b, 155)
+
+    def _update_label_list_item_text(self, item, shape: Shape):
+        if shape.group_id is None:
+            text = f"{shape.label} [{shape.shape_type}]"
+        else:
+            text = f"{shape.label} ({shape.group_id}) [{shape.shape_type}]"
+        r, g, b = shape.fill_color.getRgb()[:3]
+        item.setText(
+            f'{html.escape(text)}<font color="#{r:02x}{g:02x}{b:02x}">●</font>'
+        )
 
     def _get_rgb_by_label(self, label: str) -> tuple[int, int, int]:
         if self._config["shape_color"] == "auto":
