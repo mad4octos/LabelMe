@@ -3026,7 +3026,6 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         self._prev_opened_dir = root_dir
-        self._review_manager.set_dataset_dir(root_dir)
         self.filename = None
         self.fileListWidget.clear()
 
