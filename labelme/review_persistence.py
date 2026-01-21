@@ -129,13 +129,9 @@ class ReviewPersistence:
         return self._frames[frame_name]
 
     def set_annotation_status(
-        self,
-        frame_name: str,
-        group_id: int,
-        status: ReviewStatus,
+        self, frame_name: str, group_id: int, status: ReviewStatus
     ) -> None:
         """Update status for a specific annotation and auto-save."""
-        logger.debug("Setting annotation status")
         frame = self.get_frame_state(frame_name)
         gid_str = str(group_id)
 

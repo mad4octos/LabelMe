@@ -227,9 +227,7 @@ class IncorrectPredictionsPersistence:
         """
         saved_count = 0
 
-
         for coco_ann in coco_annotations:
-            print(self._annotations)
             # Skip if this annotation was already saved
             if self._annotation_exists(coco_ann["id"]):
                 logger.debug(

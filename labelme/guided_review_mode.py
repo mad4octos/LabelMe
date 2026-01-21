@@ -141,9 +141,7 @@ class GuidedReviewManager(QtCore.QObject):
 
     def confirm_current(self) -> None:
         """Mark current pair as confirmed and advance."""
-        logger.debug(f"@confirm_current | self.current_pair: {self.current_pair} ")
         if self.current_pair:
-            logger.debug("Good")
             # If user was editing (TO_EDIT), mark as EDITED; otherwise CONFIRMED
             if self.current_pair.status == ReviewStatus.TO_EDIT:
                 self.current_pair.status = ReviewStatus.EDITED
@@ -171,12 +169,6 @@ class GuidedReviewManager(QtCore.QObject):
 
     def _persist_current_status(self) -> None:
         """Save current annotation status to disk."""
-        logger.debug(
-            f"@_persist_current_status: "
-            f"self._persistence: {self._persistence}"
-            f"self._frame_filename: {self._frame_filename}"
-            f"self.current_pair: {self.current_pair}"
-        )
         if self._persistence and self._frame_filename and self.current_pair:
             frame_name = Path(self._frame_filename).name
             self._persistence.set_annotation_status(
