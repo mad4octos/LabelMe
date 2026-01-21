@@ -2984,6 +2984,16 @@ class MainWindow(QtWidgets.QMainWindow):
         
         if images_dir.exists() and annotations_file.exists():
             self.dataset = LazyCOCODataset(images_dir, annotations_file)
+            # Show warning dialog if dataset validation failed
+            if not self.dataset.validation_results["valid"]:
+                warning_msg = self.dataset.get_validation_warning_message()
+                if warning_msg:
+                    QMessageBox.warning(
+                        self,
+                        self.tr("COCO Dataset Validation Warning"),
+                        warning_msg,
+                        QMessageBox.Ok,
+                    )
             self.actions.exportCOCO.setEnabled(True)
             self._import_images_from_annotations_file()
         else:
