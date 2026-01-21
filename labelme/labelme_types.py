@@ -49,6 +49,12 @@ class CocoAnnotation(TypedDict):
     attributes: NotRequired[dict[str, Any]]
 
 
+class RejectedCocoAnnotation(CocoAnnotation):
+    """COCO annotation that was rejected (deleted or edited) by the user."""
+
+    rejection_type: Literal["deleted", "edited"]
+
+
 class CocoCategories(TypedDict):
     id: int
     name: str

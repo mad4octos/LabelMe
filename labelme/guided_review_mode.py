@@ -35,6 +35,7 @@ class GuidedReviewManager(QtCore.QObject):
     currentPairChanged = QtCore.pyqtSignal(object)  # AnnotationPair or None
     progressUpdated = QtCore.pyqtSignal(int, int)  # current_idx (1-based), total
     frameReviewCompleted = QtCore.pyqtSignal()
+    editConfirmed = QtCore.pyqtSignal(int)  # group_id - emitted when TO_EDIT -> EDITED
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -146,6 +147,8 @@ class GuidedReviewManager(QtCore.QObject):
             # If user was editing (TO_EDIT), mark as EDITED; otherwise CONFIRMED
             if self.current_pair.status == ReviewStatus.TO_EDIT:
                 self.current_pair.status = ReviewStatus.EDITED
+                # Emit signal so incorrect predictions can be finalized
+                self.editConfirmed.emit(self.current_pair.group_id)
             else:
                 self.current_pair.status = ReviewStatus.CONFIRMED
             self._persist_current_status()

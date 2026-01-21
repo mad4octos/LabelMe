@@ -49,6 +49,7 @@ from labelme.widgets.guided_review_widget import GuidedReviewWidget
 from labelme.widgets.guided_review_widget import MissedAnnotationDialog
 from labelme.widgets.guided_review_widget import ReviewSummaryDialog
 from labelme.guided_review_mode import GuidedReviewManager, AnnotationPair
+from labelme.incorrect_predictions_persistence import IncorrectPredictionsPersistence
 from . import utils
 from labelme.coco_dataset import LazyCOCODataset
 
@@ -226,6 +227,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Guided review mode
         self._review_manager = GuidedReviewManager(self)
+        self._incorrect_predictions: IncorrectPredictionsPersistence | None = None
         self._review_widget = GuidedReviewWidget(self)
         self.review_dock = QtWidgets.QDockWidget(self.tr("Guided Review"), self)
         self.review_dock.setObjectName("GuidedReviewDock")
@@ -241,6 +243,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._review_manager.frameReviewCompleted.connect(
             self._on_frame_review_completed
         )
+        self._review_manager.editConfirmed.connect(self._on_edit_confirmed)
 
         # Connect review widget signals
         self._review_widget.confirmClicked.connect(self._review_confirm)
@@ -1999,6 +2002,10 @@ class MainWindow(QtWidgets.QMainWindow):
             self.fileListWidget.repaint()
             return
 
+        # Clear any pending edit captures from previous frame
+        if self._incorrect_predictions:
+            self._incorrect_predictions.clear_pending_edits()
+
         prev_shapes: list[Shape] = (
             self.canvas.shapes
             if self._config["keep_prev"]
@@ -2548,6 +2555,11 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _review_edit(self) -> None:
         """Handle edit action - exits review mode for manual editing."""
+        pair = self._review_manager.current_pair
+        if pair and self._incorrect_predictions:
+            # Capture original shapes before user edits them
+            self._incorrect_predictions.capture_for_edit(pair)
+
         # Mark as TO_EDIT so we return to this annotation after editing
         self._review_manager.mark_for_edit()
 
@@ -2567,6 +2579,15 @@ class MainWindow(QtWidgets.QMainWindow):
         """Handle delete action in review mode."""
         pair = self._review_manager.current_pair
         if pair:
+            # Save shapes to incorrect predictions before deletion
+            if self._incorrect_predictions and self.imagePath:
+                self._incorrect_predictions.save_deleted_shapes(
+                    frame_name=Path(self.imagePath).name,
+                    pair=pair,
+                    image_height=self.image.height(),
+                    image_width=self.image.width(),
+                )
+
             # Delete all shapes in the pair
             for shape in pair.shapes:
                 if shape in self.canvas.shapes:
@@ -2583,6 +2604,16 @@ class MainWindow(QtWidgets.QMainWindow):
     def _reset_frame_review(self) -> None:
         """Reset review progress for the current frame."""
         self._review_manager.reset_frame_review()
+
+    def _on_edit_confirmed(self, group_id: int) -> None:
+        """Handle confirmation of an edited annotation (TO_EDIT -> EDITED)."""
+        if self._incorrect_predictions and self.imagePath:
+            self._incorrect_predictions.finalize_edit(
+                frame_name=Path(self.imagePath).name,
+                group_id=group_id,
+                image_height=self.image.height(),
+                image_width=self.image.width(),
+            )
 
     def _get_all_frame_names(self) -> list[str]:
         """Get list of all frame filenames in the dataset."""
@@ -3007,6 +3038,14 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         self._review_manager.set_dataset_dir(self.dataset.annotations_file_path.parent)
+        category_names = {
+            cat["id"]: cat["name"] for cat in self.dataset.categories
+        }
+        self._incorrect_predictions = IncorrectPredictionsPersistence(
+            self.dataset.annotations_file_path.parent,
+            category_names,
+            image_id_by_filename=self.dataset.image_id_by_filename,
+        )
 
         # Populate the sidebar File List
         for im_path in self.dataset.image_filepaths:
