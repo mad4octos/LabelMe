@@ -1715,7 +1715,8 @@ class MainWindow(QtWidgets.QMainWindow):
             image_width = self.image.width()
 
             if coco:
-                image_id = self.fileListWidget.currentRow() + 1
+                image_filename = Path(self.imagePath).name
+                image_id = self.dataset.image_id_by_filename[image_filename]
                 lf._sync_labelme_shapes_to_coco_dataset(
                     self.dataset,
                     image_id,
@@ -2079,7 +2080,8 @@ class MainWindow(QtWidgets.QMainWindow):
             ]
 
             # Get the original COCO annotations for this image
-            image_id = self.fileListWidget.currentRow() + 1
+            image_filename = Path(filename).name
+            image_id = self.dataset.image_id_by_filename[image_filename]
             image_annotations = self.dataset.annotations_by_image_id.get(image_id, [])
 
             shapes: list[ShapeDict] = []
@@ -2224,8 +2226,7 @@ class MainWindow(QtWidgets.QMainWindow):
             direction: -1 for previous image, +1 for next image.
         """
         # _can_continue() must be called BEFORE changing the row, because it may
-        # trigger a save dialog. When saving, currentRow() must still point to
-        # the current image so COCO annotations are saved to the correct index.
+        # trigger a save dialog.
         if not self._can_continue():
             return
 

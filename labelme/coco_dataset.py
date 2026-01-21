@@ -124,6 +124,10 @@ class LazyCOCODataset:
             group_coco_annotations_by_image_id(self.coco_data["annotations"])
         )
 
+        self.image_id_by_filename: dict[str, int] = {
+            img["file_name"]: img["id"] for img in self._images
+        }
+
         self.image_filepaths: list[Path] = [
             images_directory_path / self._images[i]["file_name"]
             for i in range(len(self))
