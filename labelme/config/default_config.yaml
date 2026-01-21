@@ -131,5 +131,5 @@ shortcuts:
   guided_review: Ctrl+G
   review_confirm: [C, Return]
   review_edit: E
-  review_delete: Delete
+  review_delete: Backspace
   review_exit: Escape

@@ -706,7 +706,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.tr("Delete Annotation"),
             self._review_delete,
             shortcuts.get("review_delete", "Delete"),
-            tip=self.tr("Delete current annotation (Del)"),
+            tip=self.tr("Delete current annotation (Backspace)"),
             enabled=False,
         )
         reviewExit = action(
