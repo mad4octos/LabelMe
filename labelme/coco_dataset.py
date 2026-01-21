@@ -120,6 +120,10 @@ class LazyCOCODataset:
         self.categories = self.coco_data["categories"]
         self.classes = coco_categories_to_classes(coco_categories=self.categories)
 
+        self.class_index_mapping = build_coco_class_index_mapping(
+            coco_categories=self.categories, target_classes=self.classes
+        )
+
         self.annotations_by_image_id: dict[int, list[CocoAnnotation]] = (
             group_coco_annotations_by_image_id(self.coco_data["annotations"])
         )
@@ -146,10 +150,6 @@ class LazyCOCODataset:
         https://github.com/roboflow/supervision/blob/a61440ee0b7d8dec9aff2896c78f03fb4f424c49/supervision/dataset/formats/coco.py#L212
         """
 
-        class_index_mapping = build_coco_class_index_mapping(
-            coco_categories=self.categories, target_classes=self.classes
-        )
-
         coco_image = self._images[idx]
         image_name = coco_image["file_name"]
         image_width = coco_image["width"]
@@ -165,7 +165,7 @@ class LazyCOCODataset:
         )
 
         annotation = map_detections_class_id(
-            source_to_target_mapping=class_index_mapping, detections=detections
+            source_to_target_mapping=self.class_index_mapping, detections=detections
         )
 
         image = cv2.imread(str(self.images_directory_path / image_name))
