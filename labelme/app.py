@@ -1838,9 +1838,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
             # Automatically create bbox with padding around polygon
             if shape.shape_type == "polygon" and shape.points:
-                # Calculate bounding box from polygon points
-                xs = [p.x() for p in shape.points]
-                ys = [p.y() for p in shape.points]
+                x_min, y_min, x_max, y_max = shape.get_bounding_box()
                 padding = self._config["canvas"]["bbox_padding"]
 
                 # Create rectangle shape with the same label and group_id
@@ -1852,10 +1850,10 @@ class MainWindow(QtWidgets.QMainWindow):
                     description=shape.description
                 )
                 bbox_shape.addPoint(
-                    QtCore.QPointF(min(xs) - padding, min(ys) - padding)
+                    QtCore.QPointF(x_min - padding, y_min - padding)
                 )
                 bbox_shape.addPoint(
-                    QtCore.QPointF(max(xs) + padding, max(ys) + padding)
+                    QtCore.QPointF(x_max + padding, y_max + padding)
                 )
                 bbox_shape.close()
 
