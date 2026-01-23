@@ -7,36 +7,30 @@ This fork extends the original Labelme with enhanced COCO dataset support, a Gui
 ### Key Features
 
 **COCO Dataset Integration**
-- **Load existing COCO annotations**: Import and visualize COCO-format datasets directly in the GUI
-- **Lazy loading support**: Efficiently handle large COCO datasets with `LazyCOCODataset` class
-- **Export to COCO format**: Save annotations in COCO polygon format
-  - **Polygon format preservation**: Annotations are stored as COCO polygons (`iscrowd=0`) to preserve precision
-  - When loading existing COCO annotations:
-    - Polygon annotations (`iscrowd=0`) are loaded directly without approximation, preserving their original precision
-    - RLE annotations (`iscrowd=1`) are converted to masks, then approximated to polygons for editing
-  - When saving, all polygon shapes are exported as COCO polygon format (`iscrowd=0`) to avoid precision loss
-- **Bidirectional conversion**: Convert between COCO RLE masks and polygon representations with configurable approximation tolerance
-- **Custom attributes support**: Store non-standard COCO fields like object IDs and custom attributes
+- Import and visualize COCO-format datasets (polygon and RLE formats)
+- Export annotations to COCO polygon format via **File → Export COCO Annotations**
+- Lazy loading support for large datasets
+- Dataset integrity verification on load
 
-**Guided Review Mode**
-- **Systematic annotation validation**: Review annotation pairs (bounding box + polygon) grouped by Object ID
-- **Review actions**: Confirm, Edit, or Delete each annotation pair with keyboard shortcuts
-- **Progress tracking**: Track review progress per frame and across the entire dataset
-- **Persistent state**: Review progress is automatically saved to `.labelme_review.json`
-- **Visual highlighting**: Current annotation pair is highlighted while others are dimmed
-- **Auto-advance**: Automatically moves to the next frame after completing review
+**Guided Review Mode** ([details](#guided-review-mode))
+- Review bbox-polygon pairs grouped by Object ID
+- Keyboard-driven workflow: Confirm, Edit, or Delete annotations
+- Progress tracking with auto-save to `.labelme_review.json`
+- Auto-saves deleted/edited annotations to `incorrect_predictions.json` for hard negative mining
 
-**Enhanced Navigation & Workflow**
-- **Keyboard shortcuts for shape navigation**: Switch between bounding boxes/masks using `W` (previous) and `S` (next) keys
-- **Auto-centering**: Selected shapes automatically center on screen when navigating with keyboard
-- **Shape type indicators**: Polygon label list now displays shape types for better visibility
-- **Improved file browsing**: Enhanced file list preview in dialog
+**Enhanced Navigation**
+- Keyboard shortcuts: `W`/`S` for shape navigation, `A`/`D` for frame navigation
+- Auto-centering on selected shapes
+- Shape type indicators in label list
 
-**Technical Improvements**
-- **Type safety**: Added comprehensive type definitions (`labelme_types.py`) for COCO structures and shape dictionaries
-- **Modular architecture**: Separated COCO dataset handling into dedicated module (`coco_dataset.py`)
-- **Mask-to-polygon optimization**: Improved polygon approximation from masks with adjustable tolerance (default: 0.008)
-- **Supervision library integration**: Leverages `supervision` library for robust COCO operations
+**Linked Polygon-BBox Behavior**
+- Auto-creates bounding boxes around polygons with synchronized group IDs
+- Moving a polygon also moves its paired bounding box (not vice versa)
+- Synchronized label and ObjID editing between paired shapes
+- Auto-updates bounding box dimensions when polygon is resized
+
+**Utility Scripts** ([details](#utility-scripts))
+- Extract image crops and masks from COCO annotations for hard negative training
 
 ### Guided Review Mode
 
@@ -56,7 +50,7 @@ When review mode is active:
 - For each annotation pair, you can:
   - **Confirm** (`C` or `Enter`): Mark as correct and move to next
   - **Edit** (`E`): Mark the shape as "to edit" and exit review mode. While outside review mode, modify the shape as needed, then re-enter review mode and press `C` to confirm. The shape will then be marked as "edited".
-  - **Delete** (`Delete`): Mark as deleted and move to next
+  - **Delete** (`Backspace`): Mark as deleted and move to next
   - **Reset Frame** (`R`): Reset all review progress for the current frame
 
 #### Keyboard Shortcuts
@@ -66,7 +60,7 @@ When review mode is active:
 | Start Guided Review | `Ctrl+G` |
 | Confirm | `C` or `Enter` |
 | Edit | `E` |
-| Delete | `Delete` |
+| Delete | `Backspace` |
 | Reset Frame | `R` |
 | Exit Review | `Escape` |
 
@@ -107,6 +101,185 @@ Enforce that each `group_id` contains exactly one rectangle and one polygon. Whe
 - Each group has at most one bounding box and one polygon
 
 This ensures proper pairing for the Guided Review workflow.
+
+### Hard Negative Mining
+
+Hard negatives are training examples where the model made incorrect predictions with high confidence. By collecting these failure cases and including them in training, the model can learn to avoid these specific types of errors, leading to more robust performance.
+
+#### How It Works
+
+During Guided Review, when an annotation is **deleted** or **edited**:
+1. The original annotation (as it was before the modification) is captured
+2. It is saved to `incorrect_predictions.json` in the dataset directory
+3. The annotation includes a `rejection_type` field: `"deleted"` or `"edited"`
+
+#### Output Format
+
+The `incorrect_predictions.json` file follows standard COCO format:
+
+```json
+{
+  "images": [...],
+  "categories": [...],
+  "annotations": [
+    {
+      "id": 123,
+      "image_id": 456,
+      "category_id": 1,
+      "bbox": [x, y, width, height],
+      "segmentation": [[...]],
+      "rejection_type": "deleted"
+    }
+  ]
+}
+```
+
+#### Use Cases
+
+**Deleted annotations (false positive reduction)**
+
+Bounding boxes from deleted annotations can be used to train a binary classifier that filters false positives from an object detector. The classifier learns to distinguish between true detections and the types of false positives the detector commonly produces.
+
+Masks from deleted annotations can also be used to train an anomaly classification model that rejects incorrectly segmented objects.
+
+**Edited annotations (mask quality assessment)**
+
+Pre-edit masks from edited annotations can be useful for training an anomaly classification model that rejects incorrectly segmented objects. The model learns what "wrong" masks look like.
+
+**Important:** These pre-edit masks should be manually reviewed before training. If a user edited an almost-perfect mask, the model would incorrectly learn that near-perfect masks are unacceptable. Before training, one should filter the pre-edit masks to only preserve those that were genuinely problematic (e.g., masks missing half of the object).
+
+**General use cases**
+
+- **Error analysis**: Reviewing patterns in model failures can guide data collection
+- **Crop extraction**: The `extract_crops_from_coco.py` script can extract image crops from rejected predictions for training
+
+### Utility Scripts
+
+#### Extract Crops from COCO Annotations
+
+The `scripts/extract_crops_from_coco.py` script extracts cropped image regions from COCO annotation files. It's primarily intended to be used with the `incorrect_predictions.json` file that stores deleted and edited annotations from Guided Review Mode. For each annotation in the COCO JSON file, it:
+1. Reads the bounding box coordinates from the annotation
+2. Crops the corresponding region from the source image
+3. Optionally converts the polygon segmentation to a binary mask image
+4. Saves the crops and masks with descriptive filenames that include the rejection type (deleted/edited)
+
+This is particularly useful for extracting hard negatives to train classifiers that filter false positives or reject poor-quality segmentations.
+
+**Usage:**
+
+```bash
+python scripts/extract_crops_from_coco.py \
+    --coco-file path/to/incorrect_predictions.json \
+    --images-dir path/to/images \
+    --output-dir ./output \
+    --extract-masks  # Optional: also extract binary masks
+```
+
+**Arguments:**
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `--coco-file` | Yes | Path to COCO annotation JSON file |
+| `--images-dir` | Yes | Directory containing source images |
+| `--output-dir` | No | Output directory (default: `./sam2_outputs`) |
+| `--extract-masks` | No | Also extract binary masks from segmentation polygons |
+
+**Output Structure:**
+
+```
+output_dir/
+├── crops/
+│   └── {image_name}_ann{id}_{category}_{rejection_type}_crop.png
+└── masks/  (if --extract-masks is used)
+    ├── {image_name}_ann{id}_{category}_{rejection_type}_mask.png
+    └── {image_name}_ann{id}_{category}_{rejection_type}_mask_crop.png
+```
+
+### Technical Details
+
+**COCO Format Handling**
+- Polygon annotations (`iscrowd=0`) are loaded without approximation, preserving original precision
+- RLE annotations (`iscrowd=1`) are converted to masks, then approximated to polygons for editing
+- All exports use COCO polygon format (`iscrowd=0`) to avoid precision loss
+- Bidirectional RLE-to-polygon conversion with configurable approximation tolerance (default: 0.008)
+- Custom COCO attributes like object IDs are preserved during import/export
+
+**Dataset Management**
+- Uses `LazyCOCODataset` class for efficient handling of large datasets
+- Validates datasets on load: duplicate IDs, orphan annotations, missing required fields
+- Review state persists to `.labelme_review.json` with immediate saves after each action
+
+**Review State File Format**
+
+The `.labelme_review.json` file stores the review progress for each frame and annotation in the dataset. The file is automatically created in the dataset directory when you start a Guided Review session and is updated immediately after each review action.
+
+Structure:
+```json
+{
+  "version": "1.0",
+  "frames": {
+    "00001.jpg": {
+      "status": "pending",
+      "annotations": {
+        "1": {
+          "status": "confirmed",
+          "reviewed_at": "2026-01-22T00:20:44.040144Z"
+        },
+        "9999": {
+          "status": "deleted",
+          "reviewed_at": "2026-01-22T00:20:45.357352Z"
+        },
+        "3": {
+          "status": "to_edit",
+          "reviewed_at": "2026-01-23T07:30:47.788155Z"
+        }
+      }
+    },
+    "00002.jpg": {
+      "status": "pending",
+      "annotations": {
+        "999": {
+          "status": "confirmed",
+          "reviewed_at": "2026-01-22T00:20:34.053147Z"
+        }
+      }
+    },
+    "00003.jpg": {
+      "status": "completed",
+      "annotations": {
+        "1": {
+          "status": "deleted",
+          "reviewed_at": "2026-01-21T08:32:45.711032Z"
+        }
+      }
+    }
+  }
+}
+```
+
+Fields:
+- `version`: Format version for compatibility tracking
+- `frames`: Dictionary mapping image filenames to their review state
+  - `status`: Frame-level status (`"pending"` or `"completed"`)
+  - `annotations`: Dictionary mapping group IDs (Object IDs) to their review state
+    - `status`: Annotation status (`"pending"`, `"confirmed"`, `"to_edit"`, `"edited"`, or `"deleted"`)
+    - `reviewed_at`: ISO 8601 timestamp of when the annotation was last reviewed
+
+The file enables:
+- Resuming review sessions from where you left off
+- Tracking which frames are complete vs. in-progress
+- Monitoring individual annotation review history
+- Generating review statistics and progress reports
+
+**Linked Shape Implementation**
+- Bounding box padding configurable via `canvas.bbox_padding` in config (default: 3 pixels)
+- Shapes linked via `group_id` field for synchronized operations
+- Movement synchronization: moving a polygon automatically updates its paired bbox, but moving the bbox alone does not affect the polygon (allows manual bbox margin adjustments)
+
+**Architecture**
+- Type definitions in `labelme_types.py`, COCO module in `coco_dataset.py`
+- Uses `supervision` library for COCO operations
+- Fixed panning behavior at different zoom levels
 
 ---
 
