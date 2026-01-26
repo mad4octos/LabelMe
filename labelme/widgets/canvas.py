@@ -92,6 +92,7 @@ class Canvas(QtWidgets.QWidget):
                 f"Unexpected value for double_click event: {self.double_click}"
             )
         self.num_backups = kwargs.pop("num_backups", 10)
+        self.bbox_padding = kwargs.pop("bbox_padding", 0)
         self._crosshair = kwargs.pop(
             "crosshair",
             {
@@ -438,11 +439,20 @@ class Canvas(QtWidgets.QWidget):
         # - Highlight vertex
         # Update shape/vertex fill and tooltip value accordingly.
         status_messages: list[str] = []
-        for shape in ([self.hShape] if self.hShape else []) + [
-            s for s in reversed(self.shapes) if self.isVisible(s) and s != self.hShape
-        ]:
-            # Look for a nearby vertex to highlight. If that fails,
-            # check if we happen to be inside a shape.
+        # Prioritize polygon vertices: check polygons first, then other shapes
+        visible_shapes = [
+            s for s in self.shapes if self.isVisible(s) and s != self.hShape
+        ]
+        polygons = [s for s in visible_shapes if s.shape_type == "polygon"]
+        others = [s for s in visible_shapes if s.shape_type != "polygon"]
+        shapes_to_check = (
+            ([self.hShape] if self.hShape else [])
+            + list(reversed(polygons))
+            + list(reversed(others))
+        )
+
+        # First pass: check for vertices and edges (high priority)
+        for shape in shapes_to_check:
             index = shape.nearestVertex(pos, self.epsilon)
             index_edge = shape.nearestEdge(pos, self.epsilon)
             if index is not None:
@@ -472,26 +482,29 @@ class Canvas(QtWidgets.QWidget):
                 status_messages.append(self.tr("ALT + Click to create point on shape"))
                 self.update()
                 break
-            elif shape.containsPoint(pos):
-                if self.selectedVertex() and self.hShape:
-                    self.hShape.highlightClear()
-                self.prevhVertex = self.hVertex
-                self.hVertex = None
-                self.prevhShape = self.hShape = shape
-                self.prevhEdge = self.hEdge
-                self.hEdge = None
-                status_messages.extend(
-                    [
-                        self.tr("Click & drag to move shape"),
-                        self.tr("Right-click & drag to copy shape"),
-                    ]
-                )
-                self.overrideCursor(CURSOR_GRAB)
-                self.update()
-                break
-        else:  # Nothing found, clear highlights, reset state.
-            self.restoreCursor()
-            self.unHighlight()
+        else:
+            # Second pass: check for shape bodies (lower priority)
+            for shape in shapes_to_check:
+                if shape.containsPoint(pos):
+                    if self.selectedVertex() and self.hShape:
+                        self.hShape.highlightClear()
+                    self.prevhVertex = self.hVertex
+                    self.hVertex = None
+                    self.prevhShape = self.hShape = shape
+                    self.prevhEdge = self.hEdge
+                    self.hEdge = None
+                    status_messages.extend(
+                        [
+                            self.tr("Click & drag to move shape"),
+                            self.tr("Right-click & drag to copy shape"),
+                        ]
+                    )
+                    self.overrideCursor(CURSOR_GRAB)
+                    self.update()
+                    break
+            else:  # Nothing found, clear highlights, reset state.
+                self.restoreCursor()
+                self.unHighlight()
         self.vertexSelected.emit(self.hVertex is not None)
         self._update_status(extra_messages=status_messages)
 
@@ -637,6 +650,13 @@ class Canvas(QtWidgets.QWidget):
         if self.movingShape and self.hShape:
             index = self.shapes.index(self.hShape)
             if self.shapesBackups[-1][index].points != self.shapes[index].points:
+                # If a polygon was moved, update rectangles with same group_id
+                if (
+                    self.hShape.shape_type == "polygon"
+                    and self.hShape.group_id is not None
+                ):
+                    self._update_rectangles_for_polygon(self.hShape)
+
                 self.storeShapes()
                 self.shapeMoved.emit()
 
@@ -699,9 +719,15 @@ class Canvas(QtWidgets.QWidget):
             assert self.hShape is not None
             self.hShape.highlightVertex(i=self.hVertex, action=self.hShape.MOVE_VERTEX)
         else:
+            # Prioritize polygons over other shapes when selecting
+            visible_shapes = [s for s in self.shapes if self.isVisible(s)]
+            polygons = [s for s in visible_shapes if s.shape_type == "polygon"]
+            others = [s for s in visible_shapes if s.shape_type != "polygon"]
+            shapes_to_check = list(reversed(polygons)) + list(reversed(others))
+
             shape: Shape
-            for shape in reversed(self.shapes):
-                if self.isVisible(shape) and shape.containsPoint(point):
+            for shape in shapes_to_check:
+                if shape.containsPoint(point):
                     self.setHiding()
                     if shape not in self.selectedShapes:
                         if multiple_selection_mode:
@@ -748,6 +774,39 @@ class Canvas(QtWidgets.QWidget):
             pos = self.intersectionPoint(point, pos)
         self.hShape.moveVertexBy(i=self.hVertex, offset=pos - point)
 
+    def _update_rectangles_for_polygon(self, polygon: Shape) -> None:
+        """Update rectangle bounding boxes to match polygon bounds with padding."""
+        if polygon.shape_type != "polygon" or polygon.group_id is None:
+            return
+
+        # Calculate the bounding box from polygon points
+        if not polygon.points:
+            return
+
+        min_x = min(p.x() for p in polygon.points)
+        max_x = max(p.x() for p in polygon.points)
+        min_y = min(p.y() for p in polygon.points)
+        max_y = max(p.y() for p in polygon.points)
+
+        # Apply padding
+        min_x -= self.bbox_padding
+        max_x += self.bbox_padding
+        min_y -= self.bbox_padding
+        max_y += self.bbox_padding
+
+        # Update all rectangles with the same group_id
+        for shape in self.shapes:
+            if shape.shape_type == "rectangle" and shape.group_id == polygon.group_id:
+                # IMPORTANT: Modify points in-place to avoid creating empty
+                # intermediate states. Direct assignment (shape.points = [...])
+                # can cause race conditions during mouseMoveEvent processing
+                if len(shape.points) >= 2:
+                    shape.points[0] = QPointF(min_x, min_y)
+                    shape.points[1] = QPointF(max_x, max_y)
+                else:
+                    # Rectangle doesn't have proper points yet, initialize them
+                    shape.points = [QPointF(min_x, min_y), QPointF(max_x, max_y)]
+
     def boundedMoveShapes(self, shapes, pos):
         if self.outOfPixmap(pos):
             return False  # No need to move
@@ -767,8 +826,28 @@ class Canvas(QtWidgets.QWidget):
         # self.calculateOffsets(self.selectedShapes, pos)
         dp = pos - self.prevPoint
         if dp:
+            # Move the selected shapes
             for shape in shapes:
                 shape.moveBy(dp)
+
+            # When moving polygons, also move rectangles with the same group_id
+            # Collect group_ids from polygons being moved
+            polygon_group_ids = {
+                shape.group_id
+                for shape in shapes
+                if shape.shape_type == "polygon" and shape.group_id is not None
+            }
+
+            if polygon_group_ids:
+                # Find and move all rectangles with matching group_ids
+                for shape in self.shapes:
+                    if (
+                        shape not in shapes
+                        and shape.shape_type == "rectangle"
+                        and shape.group_id in polygon_group_ids
+                    ):
+                        shape.moveBy(dp)
+
             self.prevPoint = pos
             return True
         return False
@@ -1055,6 +1134,14 @@ class Canvas(QtWidgets.QWidget):
             if self.movingShape and self.selectedShapes:
                 index = self.shapes.index(self.selectedShapes[0])
                 if self.shapesBackups[-1][index].points != self.shapes[index].points:
+                    # If a polygon was moved, update rectangles with same group_id
+                    moved_shape = self.selectedShapes[0]
+                    if (
+                        moved_shape.shape_type == "polygon"
+                        and moved_shape.group_id is not None
+                    ):
+                        self._update_rectangles_for_polygon(moved_shape)
+
                     self.storeShapes()
                     self.shapeMoved.emit()
 
