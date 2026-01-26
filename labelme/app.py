@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+from typing import TypedDict, Any, NotRequired
 import enum
 import functools
 import html
@@ -11,6 +13,7 @@ import types
 import typing
 import webbrowser
 
+import cv2
 import imgviz
 import natsort
 import numpy as np
@@ -22,6 +25,15 @@ from PyQt5 import QtGui
 from PyQt5 import QtWidgets
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QMessageBox
+from supervision.utils.file import read_json_file
+from supervision.dataset.formats.coco import (
+    coco_categories_to_classes,
+    build_coco_class_index_mapping,
+    group_coco_annotations_by_image_id,
+    coco_annotations_to_masks
+)
+from supervision.dataset.utils import map_detections_class_id
+from supervision.detection.core import Detections
 
 from labelme import __appname__
 from labelme import __version__
@@ -29,6 +41,7 @@ from labelme._automation import bbox_from_text
 from labelme._label_file import LabelFile
 from labelme._label_file import LabelFileError
 from labelme._label_file import ShapeDict
+from labelme._label_file import _get_shapes_from_coco
 from labelme.config import get_config
 from labelme.shape import Shape
 from labelme.widgets import AiPromptWidget
@@ -45,6 +58,144 @@ from labelme.widgets import ZoomWidget
 from labelme.widgets import download_ai_model
 
 from . import utils
+
+
+def coco_annotations_to_detections(
+    image_annotations: list[dict],
+    resolution_wh: tuple[int, int],
+    with_masks: bool,
+    use_iscrowd: bool = True,
+) -> Detections:
+    """
+    Modified from supervision.dataset.formats.coco.coco_annotations_to_detections
+    """
+    if not image_annotations:
+        return Detections.empty()
+
+    class_ids = [
+        image_annotation["category_id"] for image_annotation in image_annotations
+    ]
+    xyxy = [image_annotation["bbox"] for image_annotation in image_annotations]
+    xyxy = np.asarray(xyxy)
+    xyxy[:, 2:4] += xyxy[:, 0:2]
+
+    data = dict()
+    if use_iscrowd:
+        iscrowd = [
+            image_annotation["iscrowd"] for image_annotation in image_annotations
+        ]
+        area = [image_annotation["area"] for image_annotation in image_annotations]
+        obj_id = [
+            image_annotation["attributes"]["ObjID"]
+            for image_annotation in image_annotations
+        ]
+        data = dict(
+            iscrowd=np.asarray(iscrowd, dtype=int),
+            area=np.asarray(area, dtype=float),
+            obj_id=np.asarray(obj_id, dtype=int),
+        )
+
+    if with_masks:
+        mask = coco_annotations_to_masks(
+            image_annotations=image_annotations, resolution_wh=resolution_wh
+        )
+    else:
+        mask = None
+
+    return Detections(
+        class_id=np.asarray(class_ids, dtype=int), xyxy=xyxy, mask=mask, data=data
+    )
+
+
+class CocoRLE(TypedDict):
+    counts: list[int]
+    size: list[int]
+
+
+class CocoAnnotation(TypedDict):
+    id: int
+    image_id: int
+    category_id: int
+
+    # Polygon segmentation (iscrowd == 0) OR RLE (iscrowd == 1)
+    segmentation: list[list[float]] | CocoRLE
+
+    area: float
+    bbox: list[float]  # [x, y, width, height]
+    iscrowd: int  # 0 or 1
+
+    # Optional, non-standard COCO field
+    attributes: NotRequired[dict[str, Any]]
+
+
+class CocoFile(TypedDict):
+    images: list[dict]
+    categories: list[dict]
+    annotations: list[CocoAnnotation]
+
+
+class LazyCOCODataset:
+    """ """
+
+    def __init__(self, images_directory_path: Path, annotations_path: Path):
+        """ """
+        self.images_directory_path = images_directory_path
+        self.annotations_path = annotations_path
+
+        self.coco_data: CocoFile = read_json_file(file_path=annotations_path)
+        self.annotations: list[CocoAnnotation] = self.coco_data["annotations"]
+        self._images = self.coco_data["images"]
+        self.categories = self.coco_data["categories"]
+        self.classes = coco_categories_to_classes(coco_categories=self.categories)
+
+        self.annotations_by_image_id: dict[int, list[CocoAnnotation]] = (
+            group_coco_annotations_by_image_id(self.annotations)
+        )
+
+        self.image_filepaths: list[Path] = [
+            images_directory_path / self._images[i]["file_name"]
+            for i in range(len(self))
+        ]
+
+    def __len__(self) -> int:
+        return len(self.coco_data["images"])
+
+    def __iter__(self):
+        for i in range(len(self)):
+            yield self[i]
+
+    def __getitem__(self, idx):
+        """
+        Modified from:
+        https://github.com/roboflow/supervision/blob/a61440ee0b7d8dec9aff2896c78f03fb4f424c49/supervision/dataset/formats/coco.py#L212
+        """
+
+        class_index_mapping = build_coco_class_index_mapping(
+            coco_categories=self.categories, target_classes=self.classes
+        )
+
+        coco_image = self._images[idx]
+        image_name = coco_image["file_name"]
+        image_width = coco_image["width"]
+        image_height = coco_image["height"]
+        image_id = coco_image["id"]
+
+        image_annotations = self.annotations_by_image_id.get(image_id, [])
+
+        detections = coco_annotations_to_detections(
+            image_annotations=image_annotations,
+            resolution_wh=(image_width, image_height),
+            with_masks=True,
+            use_iscrowd=True,
+        )
+
+        annotation = map_detections_class_id(
+            source_to_target_mapping=class_index_mapping, detections=detections
+        )
+
+        image = cv2.imread(str(self.images_directory_path / image_name))
+
+        return image, annotation
 
 # FIXME
 # - [medium] Set max zoom value to something big enough for FitWidth/Window
@@ -1288,13 +1439,16 @@ class MainWindow(QtWidgets.QMainWindow):
 
             self._update_shape_color(shape)
             if shape.group_id is None:
-                r, g, b = shape.fill_color.getRgb()[:3]
-                item.setText(
-                    f"{html.escape(shape.label)} "
-                    f'<font color="#{r:02x}{g:02x}{b:02x}">●</font>'
-                )
+                text = f"{shape.label} [{shape.shape_type}]"
             else:
-                item.setText(f"{shape.label} ({shape.group_id})")
+                text = f"{shape.label} ({shape.group_id}) [{shape.shape_type}]"
+
+            r, g, b = shape.fill_color.getRgb()[:3]
+            item.setText(
+                f"{html.escape(text)}"
+                f'<font color="#{r:02x}{g:02x}{b:02x}">●</font>'
+            )
+
             self.setDirty()
             if self.uniqLabelList.find_label_item(shape.label) is None:
                 self.uniqLabelList.add_label_item(
@@ -1340,11 +1494,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.actions.copy.setEnabled(n_selected)
         self.actions.edit.setEnabled(n_selected)
 
-    def addLabel(self, shape):
+    def addLabel(self, shape: Shape):
         if shape.group_id is None:
-            text = shape.label
+            text = f"{shape.label} [{shape.shape_type}]"
         else:
-            text = f"{shape.label} ({shape.group_id})"
+            text = f"{shape.label} ({shape.group_id}) [{shape.shape_type}]"
         label_list_item = LabelListWidgetItem(text, shape)
         self.labelList.addItem(label_list_item)
         if self.uniqLabelList.find_label_item(shape.label) is None:
@@ -1358,7 +1512,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_shape_color(shape)
         r, g, b = shape.fill_color.getRgb()[:3]
         label_list_item.setText(
-            f'{html.escape(text)} <font color="#{r:02x}{g:02x}{b:02x}">●</font>'
+            f'{html.escape(text)}<font color="#{r:02x}{g:02x}{b:02x}">●</font>'
         )
 
     def _update_shape_color(self, shape):
@@ -1428,7 +1582,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 shape_type=shape_dict["shape_type"],
                 group_id=shape_dict["group_id"],
                 description=shape_dict["description"],
-                mask=shape_dict["mask"],
+                mask=shape_dict["mask"]
             )
             for x, y in shape_dict["points"]:
                 shape.addPoint(QtCore.QPointF(x, y))
@@ -1799,6 +1953,32 @@ class MainWindow(QtWidgets.QMainWindow):
             self._load_shape_dicts(shape_dicts=self.labelFile.shapes)
             if self.labelFile.flags is not None:
                 flags.update(self.labelFile.flags)
+        else:
+            self.curr_frame, self.curr_frame_annotations = self.dataset[
+                self.fileListWidget.currentRow()
+            ]
+
+            shapes: list[ShapeDict] = []
+
+            # Create a shape for each bounding box
+            shapes.extend(
+                _get_shapes_from_coco(
+                    detections=self.curr_frame_annotations,
+                    classes_names=self.dataset.classes,
+                )
+            )
+
+            # Create a shape for each mask
+            shapes.extend(
+                _get_shapes_from_coco(
+                    detections=self.curr_frame_annotations,
+                    classes_names=self.dataset.classes,
+                    mask=True,
+                )
+            )
+
+            self._load_shape_dicts(shape_dicts=shapes)
+
         self._load_flags(flags=flags)
         if prev_shapes and self.noShapes():
             self._load_shapes(shapes=prev_shapes, replace=False)
@@ -2178,8 +2358,21 @@ class MainWindow(QtWidgets.QMainWindow):
                 | QtWidgets.QFileDialog.DontResolveSymlinks,
             )
         )
-        self._import_images_from_dir(root_dir=targetDirPath)
-        self._open_next_image()
+
+        images_dir = Path(targetDirPath, "images", "train")
+        annotations_file = Path(targetDirPath, "annotations", "instances_train.json")
+
+        if not images_dir.exists():
+            print(f"Couldn't find expected route: '{images_dir}'")
+        if not annotations_file.exists():
+            print(f"Couldn't find expected annotations file: '{annotations_file}'")
+        
+        if images_dir.exists() and annotations_file.exists():
+            self.dataset = LazyCOCODataset(images_dir, annotations_file)
+            self._import_images_from_annotations_file()
+        else:
+            self._import_images_from_dir(root_dir=targetDirPath)
+            self._open_next_image()
 
     @property
     def imageList(self) -> list[str]:
@@ -2217,6 +2410,22 @@ class MainWindow(QtWidgets.QMainWindow):
             self.actions.openPrevImg.setEnabled(True)
 
         self._open_next_image()
+
+    def _import_images_from_annotations_file(self):
+        """ """
+        self.actions.openNextImg.setEnabled(True)
+        self.actions.openPrevImg.setEnabled(True)
+
+        if not self._can_continue():
+            return
+
+        # Populate the sidebar File List
+        for im_path in self.dataset.image_filepaths:
+            item = QtWidgets.QListWidgetItem(str(im_path))
+            item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            if im_path.exists():
+                item.setCheckState(Qt.Checked)
+            self.fileListWidget.addItem(item)
 
     def _import_images_from_dir(
         self, root_dir: str | None, pattern: str | None = None

@@ -11,9 +11,11 @@ import numpy as np
 import PIL.Image
 from loguru import logger
 from numpy.typing import NDArray
+from supervision.detection.core import Detections
 
 from labelme import __version__
 from labelme import utils
+from labelme._automation import polygon_from_mask
 
 PIL.Image.MAX_IMAGE_PIXELS = None
 
@@ -35,6 +37,45 @@ class ShapeDict(TypedDict):
     group_id: Optional[int]
     mask: Optional[NDArray[np.bool]]
     other_data: dict
+
+
+def _get_shapes_from_coco(
+    detections: Detections, classes_names: list[str], mask=False
+) -> list[ShapeDict]:
+    """ """
+
+    SHAPE_KEYS: set[str] = {
+        "label",
+        "points",
+        "group_id",
+        "shape_type",
+        "flags",
+        "description",
+        "mask",
+    }
+
+    results = []
+
+    for i, (x1, y1, x2, y2) in enumerate(detections.xyxy.astype(int).tolist()):
+        polygon_points = polygon_from_mask.compute_polygon_from_mask(
+            detections.mask[i][y1:y2, x1:x2]
+        )
+        polygon_points += [x1, y1]
+        loaded: ShapeDict = ShapeDict(
+            label=classes_names[detections.class_id[i]],
+            points=polygon_points if mask else [[x1, y1], [x2, y2]],
+            shape_type="polygon" if mask else "rectangle",
+            flags={},
+            description="",
+            group_id=int(detections.data["obj_id"][i]),
+            mask=None,
+            other_data={},
+        )
+
+        assert set(loaded.keys()) == SHAPE_KEYS | {"other_data"}
+        results.append(loaded)
+
+    return results
 
 
 def _load_shape_json_obj(shape_json_obj: dict) -> ShapeDict:

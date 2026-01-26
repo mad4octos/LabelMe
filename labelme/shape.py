@@ -225,6 +225,72 @@ class Shape:
                         self._scale_point(self.points[1]),
                     )
                     line_path.addRect(rectangle)
+
+                # Display label and ObjID
+                if self.label:
+                    text = f"{str(self.label)} | ObjID={self.group_id}"
+
+                    # Change font size
+                    font = painter.font()
+                    font.setPointSizeF(font.pointSizeF() * 0.9)
+                    painter.setFont(font)
+
+                    # Get text bounding rect
+                    fm = QtGui.QFontMetricsF(font)
+                    text_rect = fm.boundingRect(text)
+
+                    # Align text rect with rectangle position
+                    text_rect.moveTopLeft(rectangle.topLeft())
+
+                    ####################################################################################################
+                    # Draw background rectangle
+                    ####################################################################################################
+
+                    # Save painter state so temporary changes (pen, font, clip, transforms)
+                    # can be safely restored after drawing the label
+                    painter.save()
+
+                    # When the zoomed-out view makes labels overflow, clip drawing so it stays inside the bounding box
+                    painter.setClipRect(rectangle, QtCore.Qt.IntersectClip)
+
+                    # Return a new rectangle with dx1, dy1, dx2 and dy2 added
+                    # respectively to the existing coordinates of this rectangle.
+                    bg_rect = text_rect.adjusted(
+                        0, 0, text_rect.width() * 0.1, text_rect.height() * 0.2
+                    )
+                    # Draw background
+                    painter.fillRect(bg_rect, QtGui.QColor(0, 0, 0, 160))
+
+                    painter.restore()
+
+                    ####################################################################################################
+                    # Write text
+                    ####################################################################################################
+
+                    # Add margin proportional to text size
+                    margin_x = text_rect.width() * 0.03
+                    margin_y = text_rect.height()
+
+                    # Move text rect to rectangle top-left corner plus a margin downwards
+                    text_rect.moveTopLeft(
+                        rectangle.topLeft() + QtCore.QPointF(margin_x, margin_y)
+                    )
+
+                    # Save painter state so temporary changes (pen, font, clip, transforms)
+                    # can be safely restored after drawing the label
+                    painter.save()
+
+                    # When the zoomed-out view makes labels overflow, clip drawing so it stays inside the bounding box
+                    painter.setClipRect(rectangle, QtCore.Qt.IntersectClip)
+
+                    # Change text color
+                    painter.setPen(QtGui.QColor(255, 255, 255))
+
+                    # Draw text. The text is written from the given start point, upwards
+                    painter.drawText(text_rect.topLeft(), text)
+
+                    painter.restore()
+
                 if self.shape_type == "rectangle":
                     for i in range(len(self.points)):
                         self.drawVertex(vrtx_path, i)
