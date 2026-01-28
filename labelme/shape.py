@@ -430,6 +430,14 @@ class Shape:
     def boundingRect(self):
         return self.makePath().boundingRect()
 
+    def get_bounding_box(self):
+        """Return bounding box coordinates (x_min, y_min, x_max, y_max) from points."""
+        if not self.points:
+            return None
+        xs = [p.x() for p in self.points]
+        ys = [p.y() for p in self.points]
+        return min(xs), min(ys), max(xs), max(ys)
+
     def moveBy(self, offset):
         self.points = [p + offset for p in self.points]
 

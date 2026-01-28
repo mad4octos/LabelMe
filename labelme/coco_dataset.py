@@ -3,6 +3,7 @@ from pathlib import Path
 
 # External imports
 import cv2
+from loguru import logger
 import numpy as np
 import numpy.typing as npt
 from supervision.dataset.formats.coco import build_coco_class_index_mapping
@@ -137,6 +138,41 @@ class LazyCOCODataset:
             for i in range(len(self))
         ]
 
+        # Verify dataset integrity at load time
+        self.validation_results = self.verify()
+        self._log_validation_warnings()
+
+    def _log_validation_warnings(self) -> None:
+        """Log warnings if validation issues are found."""
+        if not self.validation_results["valid"]:
+            warning_msg = self.get_validation_warning_message()
+            if warning_msg:
+                logger.warning(warning_msg)
+        else:
+            logger.info("Dataset consistency validated")
+
+    def get_validation_warning_message(self) -> str | None:
+        """Get a formatted warning message for validation issues."""
+        if self.validation_results["valid"]:
+            return None
+        messages = []
+        if self.validation_results["duplicate_annotation_ids"]:
+            ids = self.validation_results["duplicate_annotation_ids"]
+            messages.append(f"Duplicate annotation IDs: {ids}")
+        if self.validation_results["duplicate_image_ids"]:
+            ids = self.validation_results["duplicate_image_ids"]
+            messages.append(f"Duplicate image IDs: {ids}")
+        if self.validation_results["orphan_annotations"]:
+            ids = self.validation_results["orphan_annotations"]
+            messages.append(f"Orphan annotations: {ids}")
+        if self.validation_results["missing_fields"]:
+            fields = self.validation_results["missing_fields"]
+            messages.append(f"Annotations with missing fields: {fields}")
+        return (
+            f"COCO dataset validation failed for "
+            f"{self.annotations_file_path}:\n" + "\n".join(messages)
+        )
+
     def __len__(self) -> int:
         return len(self.coco_data["images"])
 
@@ -197,3 +233,74 @@ class LazyCOCODataset:
         }
 
         save_json_file(file_path=output_path, data=coco_export)
+
+    def verify(self) -> dict:
+        """
+        Verify the COCO dataset for common issues.
+
+        Returns
+        -------
+        dict
+            Dictionary containing verification results with keys:
+            - 'valid': bool, True if no issues found
+            - 'duplicate_annotation_ids': list of duplicate annotation IDs
+            - 'duplicate_image_ids': list of duplicate image IDs
+            - 'orphan_annotations': list of annotations with invalid image_id
+            - 'missing_fields': list of annotations missing required fields
+        """
+        results = {
+            "valid": True,
+            "duplicate_annotation_ids": [],
+            "duplicate_image_ids": [],
+            "orphan_annotations": [],
+            "missing_fields": [],
+        }
+
+        annotations = self.coco_data["annotations"]
+        images = self.coco_data["images"]
+
+        # Check for duplicate IDs
+        def find_duplicates(items, key):
+            seen, duplicates = set(), []
+            for item in items:
+                if item[key] in seen:
+                    duplicates.append(item[key])
+                seen.add(item[key])
+            return duplicates
+
+        results["duplicate_annotation_ids"] = find_duplicates(annotations, "id")
+        results["duplicate_image_ids"] = find_duplicates(images, "id")
+
+        # Check for orphan annotations (referencing non-existent images)
+        valid_image_ids = {img["id"] for img in images}
+        for ann in annotations:
+            if ann["image_id"] not in valid_image_ids:
+                results["orphan_annotations"].append(ann["id"])
+
+        # Check for missing required fields in annotations
+        required_fields = [
+            "id",
+            "image_id",
+            "category_id",
+            "bbox",
+            "segmentation",
+            "iscrowd",
+            "attributes",
+        ]
+        for ann in annotations:
+            missing = [f for f in required_fields if f not in ann]
+            if missing:
+                results["missing_fields"].append(
+                    {"annotation_id": ann.get("id", "unknown"), "missing": missing}
+                )
+
+        # Set valid flag
+        if (
+            results["duplicate_annotation_ids"]
+            or results["duplicate_image_ids"]
+            or results["orphan_annotations"]
+            or results["missing_fields"]
+        ):
+            results["valid"] = False
+
+        return results
