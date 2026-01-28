@@ -1,3 +1,115 @@
+# Labelme fork
+
+## Custom Modifications
+
+This fork extends the original Labelme with enhanced COCO dataset support, a Guided Review Mode for systematic annotation validation, keyboard-based shape navigation, and group ID validation for bbox-polygon pairing.
+
+### Key Features
+
+**COCO Dataset Integration**
+- **Load existing COCO annotations**: Import and visualize COCO-format datasets directly in the GUI
+- **Lazy loading support**: Efficiently handle large COCO datasets with `LazyCOCODataset` class
+- **Export to COCO format**: Save annotations in COCO polygon format
+  - **Polygon format preservation**: Annotations are stored as COCO polygons (`iscrowd=0`) to preserve precision
+  - When loading existing COCO annotations:
+    - Polygon annotations (`iscrowd=0`) are loaded directly without approximation, preserving their original precision
+    - RLE annotations (`iscrowd=1`) are converted to masks, then approximated to polygons for editing
+  - When saving, all polygon shapes are exported as COCO polygon format (`iscrowd=0`) to avoid precision loss
+- **Bidirectional conversion**: Convert between COCO RLE masks and polygon representations with configurable approximation tolerance
+- **Custom attributes support**: Store non-standard COCO fields like object IDs and custom attributes
+
+**Guided Review Mode**
+- **Systematic annotation validation**: Review annotation pairs (bounding box + polygon) grouped by Object ID
+- **Review actions**: Confirm, Edit, or Delete each annotation pair with keyboard shortcuts
+- **Progress tracking**: Track review progress per frame and across the entire dataset
+- **Persistent state**: Review progress is automatically saved to `.labelme_review.json`
+- **Visual highlighting**: Current annotation pair is highlighted while others are dimmed
+- **Auto-advance**: Automatically moves to the next frame after completing review
+
+**Enhanced Navigation & Workflow**
+- **Keyboard shortcuts for shape navigation**: Switch between bounding boxes/masks using `W` (previous) and `S` (next) keys
+- **Auto-centering**: Selected shapes automatically center on screen when navigating with keyboard
+- **Shape type indicators**: Polygon label list now displays shape types for better visibility
+- **Improved file browsing**: Enhanced file list preview in dialog
+
+**Technical Improvements**
+- **Type safety**: Added comprehensive type definitions (`labelme_types.py`) for COCO structures and shape dictionaries
+- **Modular architecture**: Separated COCO dataset handling into dedicated module (`coco_dataset.py`)
+- **Mask-to-polygon optimization**: Improved polygon approximation from masks with adjustable tolerance (default: 0.008)
+- **Supervision library integration**: Leverages `supervision` library for robust COCO operations
+
+### Guided Review Mode
+
+Guided Review Mode provides a structured workflow for validating and reviewing annotations. 
+
+#### Starting Review Mode
+
+1. Open a directory containing COCO annotated images
+2. Press `Ctrl+G` or click the button "Guided Review" found in the Tools bar
+3. The review dock widget will appear showing progress and controls
+
+#### Review Workflow
+
+When review mode is active:
+- Annotations are grouped by their Object ID (`group_id`)
+- The current annotation pair (bbox + polygon) is highlighted, while other annotations are dimmed
+- For each annotation pair, you can:
+  - **Confirm** (`C` or `Enter`): Mark as correct and move to next
+  - **Edit** (`E`): Mark the shape as "to edit" and exit review mode. While outside review mode, modify the shape as needed, then re-enter review mode and press `C` to confirm. The shape will then be marked as "edited".
+  - **Delete** (`Delete`): Mark as deleted and move to next
+  - **Reset Frame** (`R`): Reset all review progress for the current frame
+
+#### Keyboard Shortcuts
+
+| Action | Shortcut |
+|--------|----------|
+| Start Guided Review | `Ctrl+G` |
+| Confirm | `C` or `Enter` |
+| Edit | `E` |
+| Delete | `Delete` |
+| Reset Frame | `R` |
+| Exit Review | `Escape` |
+
+#### Progress Tracking
+
+- **Overall Progress**: Shows how many frames have been completed across the dataset
+- **Frame Progress**: Shows how many annotation pairs have been reviewed in the current frame
+- **View Summary**: Click to see a detailed breakdown of review statistics for the current frame, all frames, and individual annotations
+
+#### Review State Persistence
+
+Review progress is automatically saved to `.labelme_review.json` in the dataset directory. The file is saved immediately after every review action (confirming, editing, deleting, or resetting), so there's no risk of losing progress. This allows you to:
+- Resume reviewing where you left off
+- Track which frames have been completed
+- See the review status of each annotation
+
+#### Annotation Statuses
+
+| Status | Description |
+|--------|-------------|
+| Pending | Not yet reviewed |
+| To Edit | Marked for editing, awaiting modifications and confirmation |
+| Edited | Was edited and then confirmed |
+| Confirmed | Reviewed and marked as correct |
+| Deleted | Marked for deletion |
+
+#### Frame Completion
+
+After reviewing all annotations in a frame:
+1. A dialog appears asking if you missed any annotations
+2. Choose "Yes, Add Annotations" to exit review mode and add missing annotations
+3. Choose "No, Continue to Next Frame" to save and auto-advance to the next image
+
+#### Group ID Validation
+
+Enforce that each `group_id` contains exactly one rectangle and one polygon. When assigning a group ID to a shape, the system validates that:
+- The group doesn't already contain a shape of the same type
+- Each group has at most one bounding box and one polygon
+
+This ensures proper pairing for the Guided Review workflow.
+
+---
+
 <h1 align="center">
   <img src="labelme/icons/icon-256.png" width="200" height="200"><br/>labelme
 </h1>

@@ -497,6 +497,7 @@ class LabelFile:
         self,
         ann_data: AnnotationWithShapes,
         resolution_wh: tuple[int, int],
+        category_name_to_id: dict[str, int],
     ) -> CocoAnnotation:
         """Update COCO annotation from edited Labelme shapes (bbox and mask).
 
@@ -507,16 +508,18 @@ class LabelFile:
         shapes = ann_data["shapes"]
 
         # Find both rectangle and polygon shapes
-        shapes_by_type = {}
+        rectangle_shape = None
+        polygon_shape = None
         for shape in shapes:
             shape_type = shape["shape_type"]
-            if shape_type not in shapes_by_type:
-                shapes_by_type[shape_type] = shape
-            else:
-                raise Exception("Problem")
-            
-        rectangle_shape = shapes_by_type.get("rectangle")
-        polygon_shape = shapes_by_type.get("polygon")
+            if shape_type == "rectangle":
+                if rectangle_shape is not None:
+                    raise Exception("Duplicate rectangle shape found")
+                rectangle_shape = shape
+            elif shape_type == "polygon":
+                if polygon_shape is not None:
+                    raise Exception("Duplicate polygon shape found")
+                polygon_shape = shape
 
         # Update bbox from rectangle shape (if exists)
         if rectangle_shape:
@@ -534,6 +537,19 @@ class LabelFile:
             annotation["area"] = area
             annotation["segmentation"] = segmentation
             annotation["iscrowd"] = iscrowd
+
+        # Update ObjID and category_id from edited shape (use polygon preferentially)
+        shape_for_updates = polygon_shape or rectangle_shape
+        if shape_for_updates is not None:
+            # Update ObjID from edited group_id
+            group_id = shape_for_updates.get("group_id")
+            if "attributes" in annotation and group_id is not None:
+                annotation["attributes"]["ObjID"] = group_id
+
+            # Update category_id from edited label
+            label = shape_for_updates.get("label")
+            if label is not None and label in category_name_to_id:
+                annotation["category_id"] = category_name_to_id[label]
 
         return annotation
 
@@ -651,7 +667,9 @@ class LabelFile:
                 _, ann_data = result
 
             # Update annotation from shapes
-            annotation = self._update_annotation_from_shapes(ann_data, resolution_wh)
+            annotation = self._update_annotation_from_shapes(
+                ann_data, resolution_wh, category_name_to_id
+            )
             new_annotations.append(annotation)
 
         # Update the dataset's annotations for this image

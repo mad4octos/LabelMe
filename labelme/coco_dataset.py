@@ -110,19 +110,27 @@ def coco_annotations_to_masks(
 class LazyCOCODataset:
     """ """
 
-    def __init__(self, images_directory_path: Path, annotations_path: Path):
+    def __init__(self, images_directory_path: Path, annotations_file_path: Path):
         """ """
         self.images_directory_path = images_directory_path
-        self.annotations_path = annotations_path
+        self.annotations_file_path = annotations_file_path
 
-        self.coco_data: CocoFile = read_json_file(file_path=annotations_path)
+        self.coco_data: CocoFile = read_json_file(file_path=annotations_file_path)
         self._images = self.coco_data["images"]
         self.categories = self.coco_data["categories"]
         self.classes = coco_categories_to_classes(coco_categories=self.categories)
 
+        self.class_index_mapping = build_coco_class_index_mapping(
+            coco_categories=self.categories, target_classes=self.classes
+        )
+
         self.annotations_by_image_id: dict[int, list[CocoAnnotation]] = (
             group_coco_annotations_by_image_id(self.coco_data["annotations"])
         )
+
+        self.image_id_by_filename: dict[str, int] = {
+            img["file_name"]: img["id"] for img in self._images
+        }
 
         self.image_filepaths: list[Path] = [
             images_directory_path / self._images[i]["file_name"]
@@ -142,10 +150,6 @@ class LazyCOCODataset:
         https://github.com/roboflow/supervision/blob/a61440ee0b7d8dec9aff2896c78f03fb4f424c49/supervision/dataset/formats/coco.py#L212
         """
 
-        class_index_mapping = build_coco_class_index_mapping(
-            coco_categories=self.categories, target_classes=self.classes
-        )
-
         coco_image = self._images[idx]
         image_name = coco_image["file_name"]
         image_width = coco_image["width"]
@@ -161,7 +165,7 @@ class LazyCOCODataset:
         )
 
         annotation = map_detections_class_id(
-            source_to_target_mapping=class_index_mapping, detections=detections
+            source_to_target_mapping=self.class_index_mapping, detections=detections
         )
 
         image = cv2.imread(str(self.images_directory_path / image_name))
@@ -175,11 +179,11 @@ class LazyCOCODataset:
         Parameters
         ----------
         output_path : Path | None
-            Where to save the COCO JSON. Defaults to original annotations_path.
+            Where to save the COCO JSON. Defaults to original annotations_file_path.
         """
 
         if output_path is None:
-            output_path = self.annotations_path
+            output_path = self.annotations_file_path
 
         # Rebuild annotations list from annotations_by_image_id
         all_annotations = []
