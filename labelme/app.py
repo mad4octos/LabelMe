@@ -2011,6 +2011,11 @@ class MainWindow(QtWidgets.QMainWindow):
             == (Qt.ControlModifier | Qt.ShiftModifier)
             else []
         )
+        # Capture current scroll position before loading the new frame
+        self.prev_scroll = {
+            orientation: self.scrollBars[orientation].value()
+            for orientation in self.scroll_values
+        }
         self.resetState()
         self.canvas.setEnabled(False)
         if filename is None:
@@ -2119,20 +2124,31 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             self.setClean()
         self.canvas.setEnabled(True)
-        # set zoom values
+
+        # Restore zoom state:
+        # - First file load: fit image to window (no prior zoom data exists)
+        # - Subsequent loads: restore saved per-file zoom only if "keep_prev_scale" is off
         is_initial_load = not self._zoom_values
-        if self.filename in self._zoom_values:
-            self._zoom_mode = self._zoom_values[self.filename][0]
-            self._set_zoom(self._zoom_values[self.filename][1])
-        elif is_initial_load or not self._config["keep_prev_scale"]:
+        if is_initial_load:
             self._zoom_mode = _ZoomMode.FIT_WINDOW
             self._adjust_scale()
-        # set scroll values
-        for orientation in self.scroll_values:
-            if self.filename in self.scroll_values[orientation]:
-                self.setScroll(
-                    orientation, self.scroll_values[orientation][self.filename]
-                )
+        elif not self._config["keep_prev_scale"] and self.filename in self._zoom_values:
+            self._zoom_mode = self._zoom_values[self.filename][0]
+            self._set_zoom(self._zoom_values[self.filename][1])
+
+        # Restore scroll (pan) position:
+        # - "keep_prev_pos" on: reuse the last scroll offsets (across all files)
+        # - "keep_prev_pos" off: restore saved per-file scroll offsets if available
+        if self._config["keep_prev_pos"]:
+            self.setScroll(Qt.Horizontal, self.prev_scroll[Qt.Horizontal])
+            self.setScroll(Qt.Vertical, self.prev_scroll[Qt.Vertical])
+        else:
+            for orientation in self.scroll_values:
+                if self.filename in self.scroll_values[orientation]:
+                    self.setScroll(
+                        orientation, self.scroll_values[orientation][self.filename]
+                    )
+        
         self.brightnessContrast(value=False, is_initial_load=True)
         self._paint_canvas()
         self.addRecentFile(self.filename)
