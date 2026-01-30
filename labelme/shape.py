@@ -227,7 +227,7 @@ class Shape:
                     line_path.addRect(rectangle)
 
                 # Display label and ObjID
-                if self.label:
+                if self.label and len(self.points) == 2:
                     text = f"{str(self.label)} | ObjID={self.group_id}"
 
                     # Change font size
