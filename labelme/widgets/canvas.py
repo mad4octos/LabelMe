@@ -808,14 +808,19 @@ class Canvas(QtWidgets.QWidget):
         if polygon.shape_type != "polygon" or polygon.group_id is None:
             return
 
-        # Calculate the bounding box from polygon points
-        if not polygon.points:
+        # Gather points from ALL polygons with the same group_id
+        all_points = []
+        for shape in self.shapes:
+            if shape.shape_type == "polygon" and shape.group_id == polygon.group_id:
+                all_points.extend(shape.points)
+
+        if not all_points:
             return
 
-        min_x = min(p.x() for p in polygon.points)
-        max_x = max(p.x() for p in polygon.points)
-        min_y = min(p.y() for p in polygon.points)
-        max_y = max(p.y() for p in polygon.points)
+        min_x = min(p.x() for p in all_points)
+        max_x = max(p.x() for p in all_points)
+        min_y = min(p.y() for p in all_points)
+        max_y = max(p.y() for p in all_points)
 
         # Apply padding
         min_x -= self.bbox_padding
