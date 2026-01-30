@@ -2760,19 +2760,21 @@ class MainWindow(QtWidgets.QMainWindow):
             self.fileListWidget.setCurrentRow(self.imageList.index(current_filename))
             self.fileListWidget.repaint()
 
-    def saveFile(self, _value=False):
+    def saveFile(self, _value=False) -> bool:
         assert not self.image.isNull(), "cannot save empty image"
         if isinstance(self.dataset, LazyCOCODataset):
-            self._saveFile(None, coco=True)
+            return self._saveFile(None, coco=True)
         else:
             if self.labelFile:
                 # DL20180323 - overwrite when in directory
-                self._saveFile(self.labelFile.filename)
+                return self._saveFile(self.labelFile.filename)
             elif self.output_file:
-                self._saveFile(self.output_file)
-                self.close()
+                if self._saveFile(self.output_file):
+                    self.close()
+                    return True
+                return False
             else:
-                self._saveFile(self.saveFileDialog())
+                return self._saveFile(self.saveFileDialog())
 
 
     def saveFileAs(self, _value=False):
@@ -2859,14 +2861,18 @@ class MainWindow(QtWidgets.QMainWindow):
             return filename[0]
         return filename
 
-    def _saveFile(self, filename, coco=False):
+    def _saveFile(self, filename, coco=False) -> bool:
         if filename is None and coco:
-            self.saveLabels(filename, coco)
+            if not self.saveLabels(filename, coco):
+                return False
             self.setClean()
+            return True
         else:
             if filename and self.saveLabels(filename):
                 self.addRecentFile(filename)
                 self.setClean()
+                return True
+            return False
 
     def closeFile(self, _value=False):
         if not self._can_continue():
@@ -2939,8 +2945,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if answer == mb.Discard:
             return True
         elif answer == mb.Save:
-            self.saveFile()
-            return True
+            return self.saveFile()
         else:  # answer == mb.Cancel
             return False
 
