@@ -685,6 +685,7 @@ class Canvas(QtWidgets.QWidget):
                     and self.hShape.group_id is not None
                 ):
                     self._update_rectangles_for_polygon(self.hShape)
+                    self.update()
 
                 self.storeShapes()
                 self.shapeMoved.emit()
@@ -1184,6 +1185,7 @@ class Canvas(QtWidgets.QWidget):
                         and moved_shape.group_id is not None
                     ):
                         self._update_rectangles_for_polygon(moved_shape)
+                        self.update()
 
                     self.storeShapes()
                     self.shapeMoved.emit()
