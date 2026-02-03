@@ -2,17 +2,12 @@
 from pathlib import Path
 
 # External imports
-import cv2
-from loguru import logger
 import numpy as np
 import numpy.typing as npt
-from supervision.dataset.formats.coco import build_coco_class_index_mapping
+from loguru import logger
 from supervision.dataset.formats.coco import coco_categories_to_classes
 from supervision.dataset.formats.coco import group_coco_annotations_by_image_id
-from supervision.dataset.utils import map_detections_class_id
 from supervision.dataset.utils import rle_to_mask
-from supervision.detection.utils.converters import polygon_to_mask
-from supervision.detection.core import Detections
 from supervision.utils.file import read_json_file
 from supervision.utils.file import save_json_file
 
@@ -21,92 +16,86 @@ from labelme.labelme_types import CocoAnnotation
 from labelme.labelme_types import CocoFile
 
 
-def coco_annotations_to_detections(
-    image_annotations: list[dict],
-    resolution_wh: tuple[int, int],
-    with_masks: bool,
-) -> Detections:
-    """
-    Convert COCO annotations to Detections object.
+def extract_labelme_polygons_from_coco_annotation(
+    annotation: CocoAnnotation,
+) -> list[npt.NDArray[np.float32]]:
+    """Extract polygon arrays from a COCO annotation with polygon segmentation.
+
+    Only works for non-crowd annotations (iscrowd=0) where the segmentation
+    is in polygon format (list of flat coordinate lists). Returns an empty list
+    for crowd annotations or RLE segmentation.
 
     Parameters
     ----------
-    image_annotations : list[dict]
-        List of COCO annotation dictionaries for a single image.
-    resolution_wh : tuple[int, int]
-        Image resolution as (width, height).
-    with_masks : bool
-        If True, convert COCO segmentation data (polygons or RLE) to binary masks.
-        If False, only bounding boxes are included (mask field will be None).
+    annotation : CocoAnnotation
+        A single COCO annotation dictionary.
 
     Returns
     -------
-    Detections
-        Detection object with bounding boxes, class IDs, masks (if requested),
-        and additional data (iscrowd, area, obj_id).
-
-    Notes
-    -----
-    Modified from supervision.dataset.formats.coco.coco_annotations_to_detections
+    list[npt.NDArray[np.float32]]
+        List of polygon arrays, each of shape (N, 2) with xy coordinates.
     """
-    if not image_annotations:
-        return Detections.empty()
+    iscrowd = annotation.get("iscrowd")
+    if iscrowd != 0:
+        return []
 
-    class_ids = [
-        image_annotation["category_id"] for image_annotation in image_annotations
-    ]
-    xyxy = [image_annotation["bbox"] for image_annotation in image_annotations]
-    xyxy = np.asarray(xyxy)
-    xyxy[:, 2:4] += xyxy[:, 0:2]
+    segmentation = annotation.get("segmentation")
+    if not isinstance(segmentation, list):
+        return []
 
-    iscrowd = [image_annotation["iscrowd"] for image_annotation in image_annotations]
-    area = [image_annotation["area"] for image_annotation in image_annotations]
-    obj_id = [
-        image_annotation["attributes"]["ObjID"]
-        for image_annotation in image_annotations
-    ]
-    data = dict(
-        iscrowd=np.asarray(iscrowd, dtype=int),
-        area=np.asarray(area, dtype=float),
-        obj_id=np.asarray(obj_id, dtype=int),
-    )
+    polygons = []
+    for flat_coords in segmentation:
+        if isinstance(flat_coords, list) and len(flat_coords) >= 6:
+            polygon_points = np.array(
+                [
+                    [flat_coords[j], flat_coords[j + 1]]
+                    for j in range(0, len(flat_coords), 2)
+                ],
+                dtype=np.float32,
+            )
+            polygons.append(polygon_points)
 
-    if with_masks:
-        mask = coco_annotations_to_masks(
-            image_annotations=image_annotations, resolution_wh=resolution_wh
-        )
-    else:
-        mask = None
-
-    return Detections(
-        class_id=np.asarray(class_ids, dtype=int), xyxy=xyxy, mask=mask, data=data
-    )
+    return polygons
 
 
-def coco_annotations_to_masks(
-    image_annotations: list[dict], resolution_wh: tuple[int, int]
-) -> npt.NDArray[np.bool_]:
-    masks = []
-    for annotation in image_annotations:
-        if annotation["iscrowd"]:
-            assert isinstance(annotation["segmentation"], dict)
-            rle = np.array(annotation["segmentation"]["counts"])
-            mask = rle_to_mask(rle=rle, resolution_wh=resolution_wh)
-            masks.append(mask)
-        else:
-            if ("segmentation" not in annotation) or not isinstance(
-                annotation["segmentation"], list
-            ):
-                # Create empty mask for annotations without valid segmentation
-                mask = np.zeros((resolution_wh[1], resolution_wh[0]), dtype=np.bool_)
-            else:
-                polygon = np.reshape(
-                    np.asarray(annotation["segmentation"], dtype=np.int32),
-                    (-1, 2),
-                )
-                mask = polygon_to_mask(polygon=polygon, resolution_wh=resolution_wh)
-            masks.append(mask)
-    return np.array(masks, dtype=bool)
+def extract_labelme_polygons_from_coco_rle_annotation(
+    annotation: CocoAnnotation,
+) -> list[npt.NDArray[np.float32]]:
+    """Extract polygons from a COCO annotation with RLE segmentation.
+
+    Decodes the RLE mask and recovers an approximate polygon
+    using compute_polygon_from_mask.
+
+    Parameters
+    ----------
+    annotation : CocoAnnotation
+        A single COCO annotation dictionary with RLE segmentation.
+
+    Returns
+    -------
+    list[npt.NDArray[np.float32]]
+        List of polygon arrays, each of shape (N, 2) with xy coordinates.
+    """
+    # Local import to avoid circular dependency with _label_file
+    from labelme._label_file import compute_polygon_from_mask
+
+    segmentation = annotation.get("segmentation")
+    if (
+        not isinstance(segmentation, dict)
+        or "counts" not in segmentation
+        or "size" not in segmentation
+    ):
+        return []
+
+    rle = np.array(segmentation["counts"])
+    h, w = segmentation["size"]
+    mask = rle_to_mask(rle=rle, resolution_wh=(w, h))
+    polygon = compute_polygon_from_mask(mask)
+    if polygon.size > 0:
+        return [polygon]
+
+    return []
+
 
 class LazyCOCODataset:
     """ """
@@ -121,9 +110,9 @@ class LazyCOCODataset:
         self.categories = self.coco_data["categories"]
         self.classes = coco_categories_to_classes(coco_categories=self.categories)
 
-        self.class_index_mapping = build_coco_class_index_mapping(
-            coco_categories=self.categories, target_classes=self.classes
-        )
+        self.category_id_to_name: dict[int, str] = {
+            cat["id"]: cat["name"] for cat in self.categories
+        }
 
         self.annotations_by_image_id: dict[int, list[CocoAnnotation]] = (
             group_coco_annotations_by_image_id(self.coco_data["annotations"])
@@ -180,33 +169,9 @@ class LazyCOCODataset:
         for i in range(len(self)):
             yield self[i]
 
-    def __getitem__(self, idx):
-        """
-        Modified from:
-        https://github.com/roboflow/supervision/blob/a61440ee0b7d8dec9aff2896c78f03fb4f424c49/supervision/dataset/formats/coco.py#L212
-        """
-
-        coco_image = self._images[idx]
-        image_name = coco_image["file_name"]
-        image_width = coco_image["width"]
-        image_height = coco_image["height"]
-        image_id = coco_image["id"]
-
-        image_annotations = self.annotations_by_image_id.get(image_id, [])
-
-        detections = coco_annotations_to_detections(
-            image_annotations=image_annotations,
-            resolution_wh=(image_width, image_height),
-            with_masks=True,
-        )
-
-        annotation = map_detections_class_id(
-            source_to_target_mapping=self.class_index_mapping, detections=detections
-        )
-
-        image = cv2.imread(str(self.images_directory_path / image_name))
-
-        return image, annotation
+    def __getitem__(self, idx) -> list[CocoAnnotation]:
+        image_id = self._images[idx]["id"]
+        return self.annotations_by_image_id.get(image_id, [])
 
     def export_annotations(self, output_path: Path | None = None) -> None:
         """
@@ -291,7 +256,11 @@ class LazyCOCODataset:
             missing = [f for f in required_fields if f not in ann]
             if missing:
                 results["missing_fields"].append(
-                    {"annotation_id": ann.get("id", "unknown"), "missing": missing}
+                    {
+                        "annotation_id": ann.get("id", "unknown"),
+                        "missing": missing,
+                        "image_id": ann.get("image_id", "unknown"),
+                    }
                 )
 
         # Set valid flag

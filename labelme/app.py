@@ -30,7 +30,7 @@ from labelme._automation import bbox_from_text
 from labelme._label_file import LabelFile
 from labelme._label_file import LabelFileError
 from labelme._label_file import ShapeDict
-from labelme._label_file import convert_coco_detections_to_shapes
+from labelme._label_file import convert_coco_annotations_to_shapes
 from labelme.config import get_config
 from labelme.shape import Shape
 from labelme.widgets import AiPromptWidget
@@ -1356,7 +1356,8 @@ class MainWindow(QtWidgets.QMainWindow):
         Validate that a group_id can be assigned to a shape of the given type.
 
         Rules:
-        - Only one rectangle and one polygon can share the same group_id.
+        - Only one rectangle per group_id
+        - Multiple polygons can share the same group_id.
         - Returns (is_valid, error_message).
 
         Args:
@@ -1367,9 +1368,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if group_id is None:
             return True, ""
 
-        # Count shapes with the same group_id by type
+        # Count rectangles with the same group_id
         rectangle_count = 0
-        polygon_count = 0
 
         for shape in self.canvas.shapes:
             if shape.group_id == group_id:
@@ -1378,19 +1378,12 @@ class MainWindow(QtWidgets.QMainWindow):
                     continue
                 if shape.shape_type == "rectangle":
                     rectangle_count += 1
-                elif shape.shape_type == "polygon":
-                    polygon_count += 1
 
         # Check if adding this shape would violate the constraint
         if shape_type == "rectangle" and rectangle_count >= 1:
             return False, self.tr(
                 "ObjID {} already has a rectangle. "
-                "Only one rectangle and one polygon can share the same ObjID."
-            ).format(group_id)
-        elif shape_type == "polygon" and polygon_count >= 1:
-            return False, self.tr(
-                "ObjID {} already has a polygon. "
-                "Only one rectangle and one polygon can share the same ObjID."
+                "Only one rectangle per ObjID is allowed."
             ).format(group_id)
 
         return True, ""
@@ -1836,31 +1829,7 @@ class MainWindow(QtWidgets.QMainWindow):
             shape.description = description
             self.addLabel(shape)
 
-            # Automatically create bbox with padding around polygon
-            if shape.shape_type == "polygon" and shape.points:
-                x_min, y_min, x_max, y_max = shape.get_bounding_box()
-                padding = self._config["canvas"]["bbox_padding"]
-
-                # Create rectangle shape with the same label and group_id
-                bbox_shape = Shape(
-                    label=shape.label,
-                    shape_type="rectangle",
-                    flags=flags,
-                    group_id=shape.group_id,
-                    description=shape.description
-                )
-                bbox_shape.addPoint(
-                    QtCore.QPointF(x_min - padding, y_min - padding)
-                )
-                bbox_shape.addPoint(
-                    QtCore.QPointF(x_max + padding, y_max + padding)
-                )
-                bbox_shape.close()
-
-                # Add the bbox to canvas and label list
-                self.canvas.shapes.append(bbox_shape)
-                self.addLabel(bbox_shape)
-                self.canvas.storeShapes()
+            self._updateGroupBbox(shape, flags)
 
             self.actions.editMode.setEnabled(True)
             self.actions.undoLastPoint.setEnabled(False)
@@ -1869,6 +1838,68 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             self.canvas.undoLastLine()
             self.canvas.shapesBackups.pop()
+
+    def _updateGroupBbox(self, shape, flags):
+        """
+        Create/update a bbox rectangle around all polygons sharing the same group_id.
+        """
+        if not (
+            shape.shape_type == "polygon"
+            and shape.points
+            and shape.group_id is not None
+        ):
+            return
+
+        padding = self._config["canvas"]["bbox_padding"]
+
+        # Collect bounding box of ALL polygons with the same group_id
+        all_xs = []
+        all_ys = []
+        for s in self.canvas.shapes:
+            if s.shape_type == "polygon" and s.group_id == shape.group_id:
+                for p in s.points:
+                    all_xs.append(p.x())
+                    all_ys.append(p.y())
+
+        x_min = min(all_xs) - padding
+        y_min = min(all_ys) - padding
+        x_max = max(all_xs) + padding
+        y_max = max(all_ys) + padding
+
+        # Check if a rectangle bbox already exists for this group_id
+        existing_rect = None
+        for s in self.canvas.shapes:
+            if s.shape_type == "rectangle" and s.group_id == shape.group_id:
+                existing_rect = s
+                break
+
+        if existing_rect is not None:
+            # Update existing rectangle to encompass all polygons
+            if len(existing_rect.points) >= 2:
+                existing_rect.points[0] = QtCore.QPointF(x_min, y_min)
+                existing_rect.points[1] = QtCore.QPointF(x_max, y_max)
+            else:
+                existing_rect.points = [
+                    QtCore.QPointF(x_min, y_min),
+                    QtCore.QPointF(x_max, y_max),
+                ]
+        else:
+            # Create new rectangle shape with the same label and group_id
+            bbox_shape = Shape(
+                label=shape.label,
+                shape_type="rectangle",
+                flags=flags,
+                group_id=shape.group_id,
+                description=shape.description,
+            )
+            bbox_shape.addPoint(QtCore.QPointF(x_min, y_min))
+            bbox_shape.addPoint(QtCore.QPointF(x_max, y_max))
+            bbox_shape.close()
+
+            self.canvas.shapes.append(bbox_shape)
+            self.addLabel(bbox_shape)
+
+        self.canvas.storeShapes()
 
     def scrollRequest(self, delta, orientation):
         units = -delta * 0.1  # natural scroll
@@ -2085,11 +2116,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if self.labelFile.flags is not None:
                 flags.update(self.labelFile.flags)
         else:
-            self.curr_frame, self.curr_frame_annotations = self.dataset[
-                self.fileListWidget.currentRow()
-            ]
-
-            # Get the original COCO annotations for this image
+            # Get the COCO annotations for this image
             image_filename = Path(filename).name
             image_id = self.dataset.image_id_by_filename[image_filename]
             image_annotations = self.dataset.annotations_by_image_id.get(image_id, [])
@@ -2098,20 +2125,18 @@ class MainWindow(QtWidgets.QMainWindow):
 
             # Create a shape for each bounding box
             shapes.extend(
-                convert_coco_detections_to_shapes(
-                    detections=self.curr_frame_annotations,
-                    classes_names=self.dataset.classes,
+                convert_coco_annotations_to_shapes(
                     image_annotations=image_annotations,
+                    category_id_to_name=self.dataset.category_id_to_name,
+                    rectangle=True
                 )
             )
 
-            # Create a shape for each mask
+            # Create a shape for each polygon
             shapes.extend(
-                convert_coco_detections_to_shapes(
-                    detections=self.curr_frame_annotations,
-                    classes_names=self.dataset.classes,
+                convert_coco_annotations_to_shapes(
                     image_annotations=image_annotations,
-                    mask=True,
+                    category_id_to_name=self.dataset.category_id_to_name,
                 )
             )
 
@@ -2735,19 +2760,21 @@ class MainWindow(QtWidgets.QMainWindow):
             self.fileListWidget.setCurrentRow(self.imageList.index(current_filename))
             self.fileListWidget.repaint()
 
-    def saveFile(self, _value=False):
+    def saveFile(self, _value=False) -> bool:
         assert not self.image.isNull(), "cannot save empty image"
         if isinstance(self.dataset, LazyCOCODataset):
-            self._saveFile(None, coco=True)
+            return self._saveFile(None, coco=True)
         else:
             if self.labelFile:
                 # DL20180323 - overwrite when in directory
-                self._saveFile(self.labelFile.filename)
+                return self._saveFile(self.labelFile.filename)
             elif self.output_file:
-                self._saveFile(self.output_file)
-                self.close()
+                if self._saveFile(self.output_file):
+                    self.close()
+                    return True
+                return False
             else:
-                self._saveFile(self.saveFileDialog())
+                return self._saveFile(self.saveFileDialog())
 
 
     def saveFileAs(self, _value=False):
@@ -2834,14 +2861,18 @@ class MainWindow(QtWidgets.QMainWindow):
             return filename[0]
         return filename
 
-    def _saveFile(self, filename, coco=False):
+    def _saveFile(self, filename, coco=False) -> bool:
         if filename is None and coco:
-            self.saveLabels(filename, coco)
+            if not self.saveLabels(filename, coco):
+                return False
             self.setClean()
+            return True
         else:
             if filename and self.saveLabels(filename):
                 self.addRecentFile(filename)
                 self.setClean()
+                return True
+            return False
 
     def closeFile(self, _value=False):
         if not self._can_continue():
@@ -2914,8 +2945,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if answer == mb.Discard:
             return True
         elif answer == mb.Save:
-            self.saveFile()
-            return True
+            return self.saveFile()
         else:  # answer == mb.Cancel
             return False
 
