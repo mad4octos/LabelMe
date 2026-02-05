@@ -2796,12 +2796,13 @@ class MainWindow(QtWidgets.QMainWindow):
             )
             return
 
-        # Ask user for output path
+        # Ask user for output path, auto-versioned
         caption = self.tr("Export COCO Annotations")
         filters = self.tr("JSON files (*.json)")
         default_path = str(
-            self.dataset.annotations_file_path.parent
-            / f"{self.dataset.annotations_file_path.stem}_export.json"
+            self._next_versioned_annotations_path(
+                self.dataset.annotations_file_path.parent
+            )
         )
 
         filename = QtWidgets.QFileDialog.getSaveFileName(
@@ -2829,6 +2830,54 @@ class MainWindow(QtWidgets.QMainWindow):
                 f"Failed to export COCO annotations:\n{str(e)}",
                 QMessageBox.Ok,
             )
+
+    @staticmethod
+    def _next_versioned_annotations_path(
+        annotations_dir: Path, base_name: str = "instances_train"
+    ) -> Path:
+        """Return the next auto-versioned path for a COCO annotations file.
+
+        Scan the parent directory for files matching ``{base_name}_v{N}.json`` and
+        returns a path with the next version number.  For example, if
+        ``instances_train_v1.json`` and ``instances_train_v2.json`` already
+        exist, this returns ``…/instances_train_v3.json``.
+        """
+
+        pattern = re.compile(rf"^{re.escape(base_name)}_v(\d+)\.json$")
+        max_version = 0
+        for p in annotations_dir.iterdir():
+            if m := pattern.match(p.name):
+                max_version = max(max_version, int(m.group(1)))
+
+        return annotations_dir / f"{base_name}_v{max_version + 1}.json"
+
+    @staticmethod
+    def _latest_versioned_annotations_file(
+        annotations_dir: Path, base_name: str = "instances_train"
+    ) -> Path | None:
+        """Return the annotations file from `annotations_dir` with the highest version number.
+
+        Look for `{base_name}_v{N}.json` in `annotations_dir`. Fall back to `{base_name}.json`
+        if no versioned file exists.  Return `None` if nothing matches.
+        """
+
+        pattern = re.compile(rf"^{re.escape(base_name)}_v(\d+)\.json$")
+        best_version = -1
+        best_path: Path | None = None
+
+        for p in annotations_dir.iterdir():
+            m = pattern.match(p.name)
+            if m:
+                v = int(m.group(1))
+                if v > best_version:
+                    best_version = v
+                    best_path = p
+
+        if best_path is not None:
+            return best_path
+
+        plain = annotations_dir / f"{base_name}.json"
+        return plain if plain.exists() else None
 
     def saveFileDialog(self):
         assert self.filename is not None
@@ -3019,25 +3068,57 @@ class MainWindow(QtWidgets.QMainWindow):
         )
 
         images_dir = Path(targetDirPath, "images", "train")
-        annotations_file = Path(targetDirPath, "annotations", "instances_train.json")
+        annotations_dir = Path(targetDirPath, "annotations")
 
-        if not images_dir.exists():
-            print(f"Couldn't find expected route: '{images_dir}'")
-        if not annotations_file.exists():
-            print(f"Couldn't find expected annotations file: '{annotations_file}'")
-        
-        if images_dir.exists() and annotations_file.exists():
+        # Validate expected COCO directory structure: images/train and annotations.
+        errors = []
+        if not (images_dir.exists() and images_dir.is_dir()):
+            errors.append(
+                f"Images directory not found:\n  '{images_dir}'\n\n"
+                f"Expected an 'images/train' folder inside the selected directory:\n  '{targetDirPath}'"
+            )
+
+        if not (annotations_dir.exists() and annotations_dir.is_dir()):
+            errors.append(
+                f"Annotations directory not found:\n  '{annotations_dir}'\n\n"
+                f"Expected an 'annotations' folder inside the selected directory:\n  '{targetDirPath}'"
+            )
+
+        annotations_file = None
+        if not errors:
+            annotations_file = self._latest_versioned_annotations_file(annotations_dir)
+            if annotations_file is None:
+                errors.append(
+                    f"No annotation JSON files found in:\n  '{annotations_dir}'\n\n"
+                    "Expected at least one JSON file inside the 'annotations' folder."
+                )
+
+        if errors:
+            QMessageBox.warning(
+                self,
+                self.tr("COCO Dataset Validation Warning"),
+                "\n\n".join(errors),
+                QMessageBox.Ok,
+            )
+
+        if images_dir.exists() and annotations_file is not None:
             self.dataset = LazyCOCODataset(images_dir, annotations_file)
             # Show warning dialog if dataset validation failed
             if not self.dataset.validation_results["valid"]:
-                warning_msg = self.dataset.get_validation_warning_message()
-                if warning_msg:
+                if warning_msg := self.dataset.get_validation_warning_message():
                     QMessageBox.warning(
                         self,
                         self.tr("COCO Dataset Validation Warning"),
                         warning_msg,
                         QMessageBox.Ok,
                     )
+            else:
+                QMessageBox.information(
+                    self,
+                    self.tr("COCO Dataset Loaded"),
+                    f"Loaded annotations from file:\n'{annotations_file.resolve()}'",
+                    QMessageBox.Ok,
+                )
             self.actions.exportCOCO.setEnabled(True)
             self._import_images_from_annotations_file()
         else:
