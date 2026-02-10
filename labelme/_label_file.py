@@ -68,6 +68,7 @@ def convert_coco_annotations_to_shapes(
     image_annotations: list[CocoAnnotation],
     category_id_to_name: dict[int, str],
     rectangle: bool = False,
+    gt_location: bool = False,
 ) -> list[ShapeDict]:
     """Convert COCO annotations to labelme shape dictionaries.
     Used to load COCO annotations into Labelme.
@@ -81,6 +82,10 @@ def convert_coco_annotations_to_shapes(
     rectangle : bool, optional
         If True, create rectangle shapes from bounding boxes.
         If False, create polygon shapes from segmentation
+        (default: False).
+    gt_location : bool, optional
+        If True, create point shapes from the ``gt_location``
+        attribute (closest known ground-truth location).
         (default: False).
 
     Returns
@@ -103,6 +108,32 @@ def convert_coco_annotations_to_shapes(
 
     results: list[ShapeDict] = []
     for annotation in image_annotations:
+        if gt_location:
+            attrs = annotation.get("attributes", {})
+            loc = attrs.get("gt_location")
+            if loc is not None:
+                GT_CIRCLE_RADIUS = 10
+                cx, cy = loc[0], loc[1]
+                shape = _make_shape(
+                    annotation,
+                    [[cx, cy], [cx + GT_CIRCLE_RADIUS, cy]],
+                    "circle",
+                )
+                parts = []
+                gt_obj_id = attrs.get("gt_obj_id")
+                if gt_obj_id is not None:
+                    parts.append(f"ObjID={gt_obj_id} | ")
+                gt_extracted = attrs.get("gt_frame_extracted")
+                if gt_extracted is not None:
+                    parts.append(f"Fr extr={gt_extracted} | ")
+                gt_original = attrs.get("gt_frame_original")
+                if gt_original is not None:
+                    parts.append(f"Fr orig={gt_original}")
+                if parts:
+                    shape["description"] = " ".join(parts)
+                results.append(shape)
+            continue
+
         # Convert COCO bbox [x, y, w, h] to [x1, y1, x2, y2]
         bx, by, bw, bh = annotation["bbox"]
         x1, y1, x2, y2 = int(bx), int(by), int(bx + bw), int(by + bh)

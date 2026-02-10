@@ -11,6 +11,7 @@ This fork extends the original Labelme with enhanced COCO dataset support, a Gui
 - Export annotations to COCO polygon format via **File → Export COCO Annotations**
 - Lazy loading support for large datasets
 - Dataset integrity verification on load
+- Ground-truth location overlay: displays ground truth attributes from COCO annotations as circles with metadata labels (location, object ID, extracted frame, original frame). These attributes come from the original .npy annotations file used to create the COCO annotations.
 
 **Guided Review Mode** ([details](#guided-review-mode))
 - Review bbox-polygon pairs grouped by Object ID
@@ -270,6 +271,11 @@ The file enables:
 - Tracking which frames are complete vs. in-progress
 - Monitoring individual annotation review history
 - Generating review statistics and progress reports
+
+**Ground-Truth Location Visualization**
+- When COCO annotations contain a `gt_location` attribute (an `[x, y]` coordinate), a circle shape is rendered at that position on the canvas
+- The circle displays metadata from the annotation's attributes as a text label: `gt_obj_id` (object ID), `gt_frame_extracted` (extracted frame number), and `gt_frame_original` (original frame number)
+- Text is rendered with a semi-transparent black background and white font, positioned above the circle center
 
 **Linked Shape Implementation**
 - Bounding box padding configurable via `canvas.bbox_padding` in config (default: 3 pixels)

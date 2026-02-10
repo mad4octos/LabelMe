@@ -2140,6 +2140,15 @@ class MainWindow(QtWidgets.QMainWindow):
                 )
             )
 
+            # Create a point for each ground-truth location
+            shapes.extend(
+                convert_coco_annotations_to_shapes(
+                    image_annotations=image_annotations,
+                    category_id_to_name=self.dataset.category_id_to_name,
+                    gt_location=True,
+                )
+            )
+
             self._load_shape_dicts(shape_dicts=shapes)
 
         self._load_flags(flags=flags)

@@ -305,6 +305,36 @@ class Shape:
                     )
                 for i in range(len(self.points)):
                     self.drawVertex(vrtx_path, i)
+
+                # Draw description text above center of the circle
+                if self.description and len(self.points) == 2:
+                    center = self._scale_point(self.points[0])
+                    font = painter.font()
+                    font.setPointSizeF(font.pointSizeF() * 0.9)
+                    fm = QtGui.QFontMetricsF(font)
+                    text_rect = fm.boundingRect(self.description)
+
+                    # Position text centered horizontally,
+                    # shifted up to avoid the center vertex
+                    vertex_margin = self.point_size / 2 + 2
+                    text_pos = QtCore.QPointF(
+                        center.x() - text_rect.width() / 2,
+                        center.y() - vertex_margin,
+                    )
+
+                    bg_rect = QtCore.QRectF(
+                        text_pos.x() - 2,
+                        text_pos.y() - fm.ascent(),
+                        text_rect.width() + 4,
+                        fm.height() + 2,
+                    )
+
+                    painter.save()
+                    painter.setFont(font)
+                    painter.fillRect(bg_rect, QtGui.QColor(0, 0, 0, 160))
+                    painter.setPen(QtGui.QColor(255, 255, 255))
+                    painter.drawText(text_pos, self.description)
+                    painter.restore()
             elif self.shape_type == "linestrip":
                 line_path.moveTo(self._scale_point(self.points[0]))
                 for i, p in enumerate(self.points):
