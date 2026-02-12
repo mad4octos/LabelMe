@@ -23,6 +23,11 @@ This fork extends the original Labelme with enhanced COCO dataset support, a Gui
 - Auto-centering on selected shapes
 - Shape type indicators in label list
 
+**Persistent Polygon Visibility**
+- Unchecking a shape in the Polygon Labels panel hides it across frame switches
+- Visibility is tracked per (label, group ID, shape type) combination
+- Re-checking a shape restores visibility on all frames
+
 **Linked Polygon-BBox Behavior**
 - Auto-creates bounding boxes around polygons with synchronized group IDs
 - Moving a polygon also moves its paired bounding box (not vice versa)
