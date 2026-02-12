@@ -86,6 +86,7 @@ class MainWindow(QtWidgets.QMainWindow):
     _brightness_contrast_values: dict[str, tuple[int | None, int | None]]
     _prev_opened_dir: str | None
     _other_data: dict | None
+    _hidden_shapes: set[tuple[str, int | None, str]]
 
     # NB: this tells Mypy etc. that `actions` here
     #     is a different type cf. the parent class
@@ -134,6 +135,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setWindowTitle(__appname__)
 
         self._copied_shapes = []
+        self._hidden_shapes: set[tuple[str, int | None, str]] = set()
 
         # Main widgets and related state.
         self.labelDialog = LabelDialog(
@@ -1548,11 +1550,26 @@ class MainWindow(QtWidgets.QMainWindow):
         self.actions.edit.setEnabled(n_selected)
 
     def addLabel(self, shape: Shape):
+        """Add a shape to the label list widget and configure its display.
+
+        Creates a LabelListWidgetItem for the shape, registers the label in
+        the unique-label list and label history, applies the label color, and
+        restores persisted visibility (shapes whose label was previously hidden
+        by the user remain hidden across frame switches).
+
+        Model signals are blocked during setup so that programmatic calls to
+        addItem / setText / setCheckState do not trigger labelItemChanged.
+        """
         if shape.group_id is None:
             text = f"{shape.label} [{shape.shape_type}]"
         else:
             text = f"{shape.label} ({shape.group_id}) [{shape.shape_type}]"
         label_list_item = LabelListWidgetItem(text, shape)
+
+        # Block signals for the entire programmatic item setup to prevent
+        # labelItemChanged from firing (both addItem and setText trigger
+        # itemChanged, which would clear _hidden_shapes).
+        self.labelList._model.blockSignals(True)
         self.labelList.addItem(label_list_item)
         if self.uniqLabelList.find_label_item(shape.label) is None:
             self.uniqLabelList.add_label_item(
@@ -1567,6 +1584,16 @@ class MainWindow(QtWidgets.QMainWindow):
         label_list_item.setText(
             f'{html.escape(text)}<font color="#{r:02x}{g:02x}{b:02x}">●</font>'
         )
+
+        # Restore persisted visibility state
+        key = (shape.label, shape.group_id, shape.shape_type)
+        if key in self._hidden_shapes:
+            label_list_item.setCheckState(Qt.Unchecked)
+            self.canvas.setShapeVisible(shape, False)
+
+        # Unblock after all item mutations are done so labelItemChanged
+        # only fires for genuine user interactions, not programmatic setup.
+        self.labelList._model.blockSignals(False)
 
     def _update_shape_color(self, shape):
         r, g, b = self._get_rgb_by_label(shape.label)
@@ -1629,6 +1656,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _load_shapes(self, shapes: list[Shape], replace: bool = True) -> None:
         self.labelList.itemSelectionChanged.disconnect(self._label_selection_changed)
+        shapes = sorted(shapes, key=lambda s: (s.label or "", s.group_id or 0))
         shape: Shape
         for shape in shapes:
             self.addLabel(shape)
@@ -1778,8 +1806,21 @@ class MainWindow(QtWidgets.QMainWindow):
             self.canvas.deSelectShape()
 
     def labelItemChanged(self, item):
+        """Handle checkbox toggle in the Polygon Labels list.
+
+        Updates canvas visibility for the associated shape and tracks it in
+        _hidden_shapes so the choice persists across frame switches.
+        """
         shape = item.shape()
-        self.canvas.setShapeVisible(shape, item.checkState() == Qt.Checked)
+        if shape is None:
+            return
+        is_checked = item.checkState() == Qt.Checked
+        self.canvas.setShapeVisible(shape, is_checked)
+        key = (shape.label, shape.group_id, shape.shape_type)
+        if is_checked:
+            self._hidden_shapes.discard(key)
+        else:
+            self._hidden_shapes.add(key)
 
     def labelOrderChanged(self):
         self.setDirty()
