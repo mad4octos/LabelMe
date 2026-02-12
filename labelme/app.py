@@ -1656,6 +1656,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _load_shapes(self, shapes: list[Shape], replace: bool = True) -> None:
         self.labelList.itemSelectionChanged.disconnect(self._label_selection_changed)
+        shapes = sorted(shapes, key=lambda s: (s.label or "", s.group_id or 0))
         shape: Shape
         for shape in shapes:
             self.addLabel(shape)

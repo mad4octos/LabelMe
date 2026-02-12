@@ -22,6 +22,7 @@ This fork extends the original Labelme with enhanced COCO dataset support, a Gui
 - Keyboard shortcuts: `W`/`S` for shape navigation, `A`/`D` for frame navigation
 - Auto-centering on selected shapes
 - Shape type indicators in label list
+- Polygon Labels list sorted by label name, then group ID
 
 **Persistent Polygon Visibility**
 - Unchecking a shape in the Polygon Labels panel hides it across frame switches
