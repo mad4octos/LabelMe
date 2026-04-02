@@ -556,6 +556,7 @@ class Canvas(QtWidgets.QWidget):
         shape.removePoint(index)
         shape.highlightClear()
         self.hShape = shape
+        self.hVertex = None
         self.prevhVertex = None
         self.movingShape = True  # Save changes
 
