@@ -2055,6 +2055,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._brightness_contrast_values[self.filename] = (brightness, contrast)
 
+        # Schedule the dialog for deletion
+        dialog.deleteLater()
+
     def togglePolygons(self, value):
         flag = value
         for item in self.labelList:
