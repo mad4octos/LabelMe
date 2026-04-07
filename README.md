@@ -207,6 +207,7 @@ output_dir/
 **COCO Format Handling**
 - Polygon annotations (`iscrowd=0`) are loaded without approximation, preserving original precision
 - RLE annotations (`iscrowd=1`) are converted to masks, then approximated to polygons for editing
+- RLE annotations are expected to be in compressed format (list of ints).
 - All exports use COCO polygon format (`iscrowd=0`) to avoid precision loss
 - Bidirectional RLE-to-polygon conversion with configurable approximation tolerance (default: 0.008)
 - Custom COCO attributes like object IDs are preserved during import/export
