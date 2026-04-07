@@ -18,7 +18,7 @@ from supervision.dataset.utils import  mask_to_rle
 from labelme import __version__
 from labelme import utils
 from labelme._automation import polygon_from_mask
-from labelme.labelme_types import CocoAnnotation, ShapeDict, CocoRLE, CocoPolygon, ShapePolygon
+from labelme.labelme_types import CocoAnnotation, ShapeDict, CompressedRLE, CocoPolygon, ShapePolygon
 from labelme.coco_dataset import extract_labelme_polygons_from_coco_annotation
 from labelme.coco_dataset import extract_labelme_polygons_from_coco_rle_annotation
 from labelme.coco_dataset import LazyCOCODataset
@@ -369,13 +369,13 @@ class LabelFile:
         list_of_polygons: list[ShapePolygon],
         resolution_wh: tuple[int, int],
         iscrowd: Literal[0, 1],
-    ) -> tuple[float, CocoRLE | list[CocoPolygon]]:
+    ) -> tuple[float, CompressedRLE | list[CocoPolygon]]:
         """
         Convert polygon points to mask and COCO segmentation format.
 
         Returns:
             tuple: (area, segmentation) where segmentation is either
-                   RLE format dict (iscrowd=1) or polygon format list (iscrowd=0)
+                   RLE (compressed) format dict (iscrowd=1) or polygon format list (iscrowd=0)
         """
         masks: npt.NDArray[np.bool_] = _polygons_to_masks(
             [np.array(points) for points in list_of_polygons], resolution_wh
@@ -383,24 +383,24 @@ class LabelFile:
         collapsed_mask = np.max(masks, axis=0)
         area = float(np.sum(collapsed_mask > 0))
 
-        segmentation: CocoRLE | list[CocoPolygon]
+        segmentation: CompressedRLE | list[CocoPolygon]
         # For non-crowd annotations, use polygon format
         if iscrowd == 0:
             segmentation = [
                 [coord for point in polygon for coord in point]
                 for polygon in list_of_polygons
             ]
-        # For crowd annotations, use RLE format
+        # For crowd annotations, use compressed RLE format
         elif iscrowd == 1:
-            uncompressed_counts = mask_to_rle(collapsed_mask)
-            uncompressed_counts = list(map(int, uncompressed_counts))
-            # pycocotools can also generate RLE masks, but with compressed counts (a bytes string in LEB128
-            # variable-length encoding rather than a list of ints)
+            compressed_counts = mask_to_rle(collapsed_mask)
+            compressed_counts = list(map(int, compressed_counts))
+            # pycocotools can also generate RLE masks, but in uncompressed format, with encoded counts
+            # (a bytes string in LEB128 variable-length encoding)
             # segmentation = pycocotools.mask.encode(
             #     np.asfortranarray(collapsed_mask.astype(np.uint8))
             # )
             segmentation = {
-                "counts": uncompressed_counts,
+                "counts": compressed_counts,
                 "size": list(collapsed_mask.shape[:2]),
             }
         else:

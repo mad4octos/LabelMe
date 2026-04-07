@@ -15,7 +15,7 @@ CocoPolygon = list[float]
 ShapePolygon = list[list[float]]
 
 
-class CocoRLE(TypedDict):
+class CompressedRLE(TypedDict):
     counts: list[int]
     size: list[int]
 
@@ -26,7 +26,7 @@ class CocoAnnotation(TypedDict):
     category_id: int
 
     # Polygon segmentation (iscrowd == 0) OR RLE (iscrowd == 1)
-    segmentation: list[CocoPolygon] | CocoRLE
+    segmentation: list[CocoPolygon] | CompressedRLE
 
     area: float
     bbox: list[float]  # [x, y, width, height]
