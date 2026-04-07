@@ -93,6 +93,8 @@ class Canvas(QtWidgets.QWidget):
             )
         self.num_backups = kwargs.pop("num_backups", 10)
         self.bbox_padding = kwargs.pop("bbox_padding", 0)
+        self._hover_opacity = kwargs.pop("hover_opacity", 0.15)
+        self._review_focus_opacity = kwargs.pop("review_focus_opacity", 0.0)
         self._crosshair = kwargs.pop(
             "crosshair",
             {
@@ -132,10 +134,7 @@ class Canvas(QtWidgets.QWidget):
         self._is_dragging_enabled = False
         # Guided review mode
         self._review_editing_blocked = False  # Blocks shape editing
-        self._review_highlight_active = False  # Visual dimming
-        self._highlighted_group_id: int | None = None
-        self._dim_opacity = 0.3
-        self._highlight_opacity = 0.4  # Opacity for highlighted shapes in review mode
+        self._review_focus_group_id : int | None = None
         # Menus:
         # 0: right-click without selection and dragging of shapes
         # 1: right-click with selection and dragging of shapes
@@ -173,17 +172,11 @@ class Canvas(QtWidgets.QWidget):
         logger.debug("Setting AI model to {!r}", model_name)
         self._ai_model_name = model_name
 
-    def set_review_highlight(
-        self, active: bool, highlighted_group_id: int | None = None
-    ) -> None:
+    def set_review_focus(self, group_id: int | None = None) -> None:
         """
-        Enable/disable review mode visual feedback (dimming).
-
-        When active, only shapes with highlighted_group_id are fully visible.
-        Other shapes are dimmed.
+        When set, only shapes with group_id are fully visible.
         """
-        self._review_highlight_active = active
-        self._highlighted_group_id = highlighted_group_id
+        self._review_focus_group_id = group_id
         self.update()
 
     def set_review_editing_blocked(self, blocked: bool) -> None:
@@ -955,17 +948,18 @@ class Canvas(QtWidgets.QWidget):
         Shape.scale = self.scale
         for shape in self.shapes:
             if (shape.selected or not self._hideBackround) and self.isVisible(shape):
+                # The shape will be filled if selected or hovered
                 shape.fill = shape.selected or shape == self.hShape
 
-                # Apply dimming/highlighting in review mode
-                if self._review_highlight_active:
-                    is_highlighted = shape.group_id == self._highlighted_group_id
-                    p.setOpacity(
-                        self._highlight_opacity if is_highlighted else self._dim_opacity
-                    )
-                    shape.paint(p)
-                else:
-                    shape.paint(p)
+                fill_opacity = self._hover_opacity
+                if (
+                    self._review_editing_blocked
+                    and shape.group_id == self._review_focus_group_id
+                ):
+                    fill_opacity = self._review_focus_opacity
+
+                self._paint_shape_with_opacity(p, shape, fill_opacity)
+
         if self.current:
             self.current.paint(p)
             assert len(self.line.points) == len(self.line.point_labels)
@@ -1247,30 +1241,31 @@ class Canvas(QtWidgets.QWidget):
         self.visible[shape] = value
         self.update()
 
-    def _draw_review_highlight(self, painter: QtGui.QPainter, shape: Shape) -> None:
-        """Draw a highlight effect around the shape being reviewed."""
-        if not shape.points:
-            return
-        rect = shape.boundingRect()
-        if rect is None:
-            return
-        # Scale rect to screen coordinates
-        scaled_rect = QtCore.QRectF(
-            rect.x() * self.scale,
-            rect.y() * self.scale,
-            rect.width() * self.scale,
-            rect.height() * self.scale,
-        )
-        # Add padding
-        padding = 5
-        scaled_rect.adjust(-padding, -padding, padding, padding)
+    def _paint_shape_with_opacity(
+        self, painter: QtGui.QPainter, shape: Shape, fill_opacity: float
+    ) -> None:
+        """Paint a shape with a reduced fill opacity.
 
-        pen = QtGui.QPen(QtGui.QColor(255, 215, 0, 200))  # Gold color
-        pen.setWidth(3)
-        pen.setStyle(QtCore.Qt.DashLine)
-        painter.setPen(pen)
-        painter.setBrush(QtCore.Qt.NoBrush)
-        painter.drawRect(scaled_rect)
+        Temporarily scales the alpha of both fill colors (selected and unselected)
+        by fill_opacity, paints the shape, then restores the original alpha values.
+        The outline alpha is unaffected.
+        """
+
+        # Set the alpha of the shape's fill color when it's selected
+        original_select_fill_color_alpha = shape.select_fill_color.alpha()
+        shape.select_fill_color.setAlpha(
+            int(original_select_fill_color_alpha * fill_opacity)
+        )
+
+        # Set the alpha of the shape's fill color when it's not selected (effective when hovered)
+        original_fill_color_alpha = shape.fill_color.alpha()
+        shape.fill_color.setAlpha(int(original_fill_color_alpha * fill_opacity))
+
+        shape.paint(painter)
+
+        # Restore shape's original alpha values
+        shape.select_fill_color.setAlpha(original_select_fill_color_alpha)
+        shape.fill_color.setAlpha(original_fill_color_alpha)
 
     def overrideCursor(self, cursor):
         if cursor == self._cursor:

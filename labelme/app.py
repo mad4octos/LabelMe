@@ -206,6 +206,8 @@ class MainWindow(QtWidgets.QMainWindow):
             num_backups=self._config["canvas"]["num_backups"],
             crosshair=self._config["canvas"]["crosshair"],
             bbox_padding=self._config["canvas"]["bbox_padding"],
+            hover_opacity=self._config["canvas"]["hover_opacity"],
+            review_focus_opacity=self._config["canvas"]["review_focus_opacity"],
         )
         self.canvas.zoomRequest.connect(self._zoom_requested)
         self.canvas.mouseMoved.connect(self._update_status_stats)
@@ -2553,7 +2555,6 @@ class MainWindow(QtWidgets.QMainWindow):
             self.canvas.set_review_editing_blocked(True)
         else:
             # Restore normal canvas state
-            self.canvas.set_review_highlight(False)
             self.canvas.set_review_editing_blocked(False)
             self.review_dock.setVisible(False)
 
@@ -2562,8 +2563,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._review_widget.update_current_pair(pair)
 
         if pair:
-            # Update canvas highlighting
-            self.canvas.set_review_highlight(True, pair.group_id)
+            # Update guided review focus
+            self.canvas.set_review_focus(pair.group_id)
 
             # Select shapes in the pair
             self.canvas.selectShapes(pair.shapes)
@@ -2572,9 +2573,6 @@ class MainWindow(QtWidgets.QMainWindow):
             if pair.shapes:
                 self._zoom_to_shapes(pair.shapes)
         else:
-            # Clear visual highlighting but keep editing blocked.
-            # Editing is unblocked when exiting review mode via _on_review_mode_changed
-            self.canvas.set_review_highlight(False)
             self.canvas.deSelectShape()
 
     def _on_frame_review_completed(self) -> None:
