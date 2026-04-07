@@ -23,7 +23,7 @@ def extract_labelme_polygons_from_coco_annotation(
 
     Only works for non-crowd annotations (iscrowd=0) where the segmentation
     is in polygon format (list of flat coordinate lists). Returns an empty list
-    for crowd annotations or RLE segmentation.
+    for crowd annotations or Compressed RLE segmentation.
 
     Parameters
     ----------
@@ -61,15 +61,15 @@ def extract_labelme_polygons_from_coco_annotation(
 def extract_labelme_polygons_from_coco_rle_annotation(
     annotation: CocoAnnotation,
 ) -> list[npt.NDArray[np.float32]]:
-    """Extract polygons from a COCO annotation with RLE segmentation.
+    """Extract polygons from a COCO annotation with Compressed RLE segmentation.
 
-    Decodes the RLE mask and recovers an approximate polygon
+    Decodes the Compressed RLE mask and recovers an approximate polygon
     using compute_polygon_from_mask.
 
     Parameters
     ----------
     annotation : CocoAnnotation
-        A single COCO annotation dictionary with RLE segmentation.
+        A single COCO annotation dictionary with Compressed RLE segmentation.
 
     Returns
     -------

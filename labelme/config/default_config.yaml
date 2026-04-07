@@ -9,7 +9,9 @@ logger_level: info
 
 flags: null
 label_flags: null
-labels: null
+labels:
+  - Parrotfish
+  - Surgeonfish
 file_search: null
 sort_labels: true
 validate_label: null
@@ -73,6 +75,9 @@ canvas:
   num_backups: 10
   # Padding in pixels to add to bbox around polygon
   bbox_padding: 3
+  # Opacity for focused shapes in guided review mode (0.0 = fully transparent, 1.0 = fully opaque)
+  hover_opacity: 0.15
+  review_focus_opacity: 0.0
   # show crosshair
   crosshair:
     polygon: false
