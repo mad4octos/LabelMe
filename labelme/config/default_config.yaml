@@ -9,7 +9,9 @@ logger_level: info
 
 flags: null
 label_flags: null
-labels: null
+labels:
+  - Parrotfish
+  - Surgeonfish
 file_search: null
 sort_labels: true
 validate_label: null
