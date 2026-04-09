@@ -279,7 +279,7 @@ class IncorrectPredictionsPersistence:
         image_width: int,
     ) -> bool:
         """Save deleted shapes to the incorrect predictions file in COCO format."""
-        coco_annotations = []
+        coco_annotations: list[CocoAnnotation] = []
 
         for shape in pair.shapes:
             coco_ann = self._extract_coco_annotation(shape)
@@ -323,7 +323,7 @@ class IncorrectPredictionsPersistence:
             group_id: The annotation group ID being edited
             shapes: List of Shape objects to capture
         """
-        coco_annotations = []
+        coco_annotations: list[CocoAnnotation] = []
 
         for shape in pair.shapes:
             coco_ann = self._extract_coco_annotation(shape)
