@@ -277,6 +277,10 @@ class IncorrectPredictionsPersistence:
             shapes: List of Shape objects to capture
         """
 
+        if pair.group_id in self._pending_edits:
+            # Original already captured; don't overwrite the baseline
+            return
+
         coco_annotations = self._collect_coco_annotations(pair)
         if coco_annotations:
             self._pending_edits[pair.group_id] = coco_annotations
