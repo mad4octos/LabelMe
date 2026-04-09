@@ -12,6 +12,7 @@ from loguru import logger
 from labelme.guided_review_mode import AnnotationPair
 from labelme.labelme_types import CocoAnnotation
 from labelme.labelme_types import RejectedCocoAnnotation
+from labelme.labelme_types import is_coco_annotation
 from labelme.shape import Shape
 
 
@@ -105,16 +106,11 @@ class IncorrectPredictionsPersistence:
             logger.error(f"Failed to save incorrect predictions: {e}")
             return False
 
-    def _extract_coco_annotation(self, shape: Shape) -> CocoAnnotation | None:
+    def _extract_coco_annotation(self, shape: Shape) -> dict | None:
         """Extract COCO annotation from a shape's other_data."""
         if not shape.other_data:
             return None
         return shape.other_data.get("original_annotation")
-
-    def _is_valid_coco_annotation(self, coco_ann: CocoAnnotation) -> bool:
-        """Check if a COCO annotation has all required fields."""
-        required_keys = ("id", "image_id", "category_id")
-        return all(key in coco_ann for key in required_keys)
 
     def _generate_annotation_id(self) -> int:
         """Generate a unique negative ID for GUI-created annotations."""
@@ -294,7 +290,7 @@ class IncorrectPredictionsPersistence:
                     )
                     continue
 
-            if not self._is_valid_coco_annotation(coco_ann):
+            if not is_coco_annotation(coco_ann):
                 logger.warning(
                     f"Shape '{shape.label}' (group_id={pair.group_id}) "
                     "has invalid COCO annotation (missing required fields), "
@@ -327,7 +323,7 @@ class IncorrectPredictionsPersistence:
 
         for shape in pair.shapes:
             coco_ann = self._extract_coco_annotation(shape)
-            if coco_ann and self._is_valid_coco_annotation(coco_ann):
+            if coco_ann and is_coco_annotation(coco_ann):
                 coco_annotations.append(deepcopy(coco_ann))
 
         if coco_annotations:
