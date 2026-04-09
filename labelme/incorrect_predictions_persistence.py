@@ -7,13 +7,26 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Literal
 
+import numpy as np
+import numpy.typing as npt
 from loguru import logger
+from supervision.dataset.formats.yolo import _polygons_to_masks
+from supervision.dataset.utils import rle_to_mask
 
+from labelme.coco_dataset import extract_labelme_polygons_from_coco_annotation
 from labelme.guided_review_mode import AnnotationPair
 from labelme.labelme_types import CocoAnnotation
 from labelme.labelme_types import RejectedCocoAnnotation
 from labelme.labelme_types import is_coco_annotation
+from labelme.labelme_types import is_compressed_rle
+from labelme.labelme_types import is_polygon_segmentation
 from labelme.shape import Shape
+from labelme.utils.shape import shape_to_mask
+
+# Minimum IoU change required to consider an edit "significant".
+# If pre-edit and post-edit masks overlap by more than this fraction,
+# the edit is considered a no-op and will not be saved.
+_EDIT_SIGNIFICANCE_IOU_THRESHOLD = 0.95
 
 
 class IncorrectPredictionsPersistence:
@@ -361,6 +374,102 @@ class IncorrectPredictionsPersistence:
             image_width=image_width,
             rejection_type="edited",
             group_id=group_id,
+        )
+
+    @staticmethod
+    def _coco_annotation_to_mask(
+        coco_ann: CocoAnnotation, image_height: int, image_width: int
+    ) -> npt.NDArray[np.bool_]:
+        """Decode a COCO annotation's segmentation to a binary mask."""
+        mask = np.zeros((image_height, image_width), dtype=bool)
+
+        segmentation = coco_ann.get("segmentation")
+        if is_compressed_rle(segmentation):
+            rle = np.array(segmentation["counts"])
+            h, w = segmentation["size"]
+            mask = rle_to_mask(rle=rle, resolution_wh=(w, h))
+            mask = mask.astype(bool)
+            assert mask.shape == (image_height, image_width)
+        elif is_polygon_segmentation(segmentation):
+            list_of_polygons = extract_labelme_polygons_from_coco_annotation(coco_ann)
+            if list_of_polygons:
+                masks = _polygons_to_masks(
+                    list_of_polygons, (image_width, image_height)
+                )
+                mask = np.max(masks, axis=0).astype(bool)
+
+        return mask
+
+    @staticmethod
+    def _shapes_to_mask(
+        shapes: list[Shape], group_id: int, image_height: int, image_width: int
+    ) -> npt.NDArray[np.bool_]:
+        """Convert canvas shapes for a given group_id to a combined binary mask."""
+        mask = np.zeros((image_height, image_width), dtype=bool)
+        for shape in shapes:
+            if shape.shape_type != "polygon":
+                continue
+
+            if shape.group_id != group_id:
+                continue
+
+            if shape.mask is not None:
+                if shape.mask.shape == (image_height, image_width):
+                    mask |= shape.mask.astype(bool)
+            elif shape.points:
+                points = [[p.x(), p.y()] for p in shape.points]
+                mask |= shape_to_mask(
+                    (image_height, image_width), points, shape_type="polygon"
+                )
+        return mask
+
+    def has_significant_changes(
+        self,
+        group_id: int,
+        current_shapes: list[Shape],
+        image_height: int,
+        image_width: int,
+    ) -> bool:
+        """Return True if the edit made significant changes (mask IoU < threshold).
+
+        Compares the original captured annotation mask with the current canvas
+        shapes. If the masks are nearly identical the edit is considered a no-op
+        and the annotation should not be saved.
+        """
+        if group_id not in self._pending_edits:
+            logger.debug(f"No pending edit for group_id={group_id}, assuming changed")
+            return True
+
+        # Build original mask from captured COCO annotations
+        original_mask = np.zeros((image_height, image_width), dtype=bool)
+        for ann in self._pending_edits[group_id]:
+            original_mask |= self._coco_annotation_to_mask(
+                ann, image_height, image_width
+            )
+
+        # Build current mask from canvas shapes with matching group_id
+        current_mask = self._shapes_to_mask(
+            current_shapes, group_id, image_height, image_width
+        )
+
+        union = np.logical_or(original_mask, current_mask).sum()
+        if union == 0:
+            return False  # Both masks empty — nothing to compare
+
+        intersection = np.logical_and(original_mask, current_mask).sum()
+        iou = float(intersection / union)
+
+        logger.debug(
+            f"Edit IoU for group_id={group_id}: {iou:.3f} "
+            f"(threshold={_EDIT_SIGNIFICANCE_IOU_THRESHOLD})"
+        )
+        return iou < _EDIT_SIGNIFICANCE_IOU_THRESHOLD
+
+    def cancel_pending_edit(self, group_id: int) -> None:
+        """Discard a pending edit capture without saving (no significant changes)."""
+        self._pending_edits.pop(group_id, None)
+        logger.debug(
+            f"Cancelled pending edit for group_id={group_id} (no significant change)"
         )
 
     def clear_pending_edits(self) -> None:

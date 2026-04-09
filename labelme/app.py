@@ -2698,11 +2698,26 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_edit_confirmed(self, group_id: int) -> None:
         """Handle confirmation of an edited annotation (TO_EDIT -> EDITED)."""
         if self._incorrect_predictions and self.imagePath:
+            image_height = self.image.height()
+            image_width = self.image.width()
+            if not self._incorrect_predictions.has_significant_changes(
+                group_id=group_id,
+                current_shapes=self.canvas.shapes,
+                image_height=image_height,
+                image_width=image_width,
+            ):
+                logger.debug(
+                    f"No significant mask changes for group_id={group_id}"
+                    " — skipping save"
+                )
+                self._incorrect_predictions.cancel_pending_edit(group_id)
+                return
+
             self._incorrect_predictions.finalize_edit(
                 frame_name=Path(self.imagePath).name,
                 group_id=group_id,
-                image_height=self.image.height(),
-                image_width=self.image.width(),
+                image_height=image_height,
+                image_width=image_width,
             )
 
     def _get_all_frame_names(self) -> list[str]:
