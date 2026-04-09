@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from copy import deepcopy
 from pathlib import Path
 from typing import Literal
 
@@ -131,55 +130,6 @@ class IncorrectPredictionsPersistence:
         self._next_generated_id -= 1
         return id_
 
-    def _create_coco_annotation_from_shape(
-        self, shape: Shape, frame_name: str
-    ) -> CocoAnnotation | None:
-        """
-        Create a COCO annotation from a GUI-created Shape.
-
-        Returns None if the shape cannot be converted (missing label, unknown category,
-        or unknown image).
-        """
-        if not shape.label:
-            logger.warning("Shape has no label, cannot create COCO annotation")
-            return None
-
-        category_id = self._category_id_by_name.get(shape.label)
-        if category_id is None:
-            logger.warning(
-                f"Unknown category '{shape.label}', cannot create COCO annotation"
-            )
-            return None
-
-        image_id = self._image_id_by_filename.get(frame_name)
-        if image_id is None:
-            logger.warning(
-                f"Unknown image '{frame_name}', cannot create COCO annotation"
-            )
-            return None
-
-        # Compute bounding box from shape points
-        bbox = shape.get_bounding_box()
-        if bbox is None:
-            logger.warning("Shape has no points, cannot create COCO annotation")
-            return None
-
-        x_min, y_min, x_max, y_max = bbox
-        width = x_max - x_min
-        height = y_max - y_min
-        area = width * height
-
-        coco_ann: CocoAnnotation = {
-            "id": self._generate_annotation_id(),
-            "image_id": image_id,
-            "category_id": category_id,
-            "bbox": [x_min, y_min, width, height],
-            "area": area,
-            "iscrowd": 0,
-        }
-
-        return coco_ann
-
     def _add_image_if_needed(
         self,
         image_id: int,
@@ -280,41 +230,35 @@ class IncorrectPredictionsPersistence:
 
         return True  # No annotations to save is not an error
 
-    def save_deleted_shapes(
-        self,
-        frame_name: str,
-        pair: AnnotationPair,
-        image_height: int,
-        image_width: int,
-    ) -> bool:
-        """Save deleted shapes to the incorrect predictions file in COCO format."""
+    def _collect_coco_annotations(self, pair: AnnotationPair) -> list[CocoAnnotation]:
+        """Extract valid original COCO annotations from polygon shapes in a pair."""
         coco_annotations: list[CocoAnnotation] = []
-
         for shape in pair.shapes:
+            if shape.shape_type != "polygon":
+                continue
+
             coco_ann = self._extract_coco_annotation(shape)
 
-            # If no existing COCO annotation, create one from the shape
+            # This is a shape that was manually created during the session
             if coco_ann is None:
-                coco_ann = self._create_coco_annotation_from_shape(shape, frame_name)
-                if coco_ann is None:
-                    logger.warning(
-                        f"Shape '{shape.label}' (group_id={pair.group_id}) "
-                        "could not be converted to COCO annotation, skipping"
-                    )
-                    continue
+                continue
 
             if not is_coco_annotation(coco_ann):
-                logger.warning(
+                raise Exception(
                     f"Shape '{shape.label}' (group_id={pair.group_id}) "
-                    "has invalid COCO annotation (missing required fields), "
-                    "skipping"
+                    "has an invalid COCO annotation."
                 )
-                continue
 
             coco_annotations.append(coco_ann)
 
+        return coco_annotations
+
+    def save_deleted_shapes(
+        self, frame_name: str, pair: AnnotationPair, image_height: int, image_width: int
+    ) -> bool:
+        """Save deleted shapes to the incorrect predictions file in COCO format."""
         return self._save_coco_annotations(
-            coco_annotations=coco_annotations,
+            coco_annotations=self._collect_coco_annotations(pair),
             frame_name=frame_name,
             image_height=image_height,
             image_width=image_width,
@@ -332,13 +276,8 @@ class IncorrectPredictionsPersistence:
             group_id: The annotation group ID being edited
             shapes: List of Shape objects to capture
         """
-        coco_annotations: list[CocoAnnotation] = []
 
-        for shape in pair.shapes:
-            coco_ann = self._extract_coco_annotation(shape)
-            if coco_ann and is_coco_annotation(coco_ann):
-                coco_annotations.append(deepcopy(coco_ann))
-
+        coco_annotations = self._collect_coco_annotations(pair)
         if coco_annotations:
             self._pending_edits[pair.group_id] = coco_annotations
             logger.debug(
