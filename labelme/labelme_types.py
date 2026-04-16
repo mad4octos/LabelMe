@@ -1,9 +1,11 @@
 # Standard Library imports
+from collections.abc import Mapping
 from typing import Any
 from typing import Literal
 from typing import NotRequired
 from typing import Optional
 from typing import TypedDict
+from typing import TypeGuard
 
 # External imports
 import numpy as np
@@ -18,6 +20,25 @@ ShapePolygon = list[list[float]]
 class CompressedRLE(TypedDict):
     counts: list[int]
     size: list[int]
+
+
+def is_compressed_rle(d: Any) -> TypeGuard[CompressedRLE]:
+    return (
+        isinstance(d, dict)
+        and "counts" in d
+        and "size" in d
+        and isinstance(d["counts"], list)
+        and isinstance(d["size"], list)
+        and len(d["size"]) == 2
+        and all(isinstance(c, int) for c in d["size"])
+        and (not d["counts"] or isinstance(d["counts"][0], int))
+    )
+
+
+def is_polygon_segmentation(seg: Any) -> TypeGuard[list[CocoPolygon]]:
+    return isinstance(seg, list) and all(
+        isinstance(p, list) and all(isinstance(v, (int, float)) for v in p) for p in seg
+    )
 
 
 class CocoAnnotation(TypedDict):
@@ -44,6 +65,32 @@ class CocoAnnotation(TypedDict):
 
     # Optional, non-standard COCO field
     attributes: NotRequired[dict[str, Any]]
+
+
+def is_coco_annotation(d: Mapping[str, Any]) -> TypeGuard[CocoAnnotation]:
+    """Return True if `d` is a valid CocoAnnotation with all required fields and types."""
+    if not all(isinstance(d.get(k), int) for k in ("id", "image_id", "category_id")):
+        return False
+    if not isinstance(d.get("area"), (int, float)):
+        return False
+    bbox = d.get("bbox")
+    if not (
+        isinstance(bbox, list)
+        and len(bbox) == 4
+        and all(isinstance(v, (int, float)) for v in bbox)
+    ):
+        return False
+    iscrowd = d.get("iscrowd")
+    if iscrowd not in (0, 1):
+        return False
+    seg = d.get("segmentation")
+    if iscrowd == 1:
+        if not is_compressed_rle(seg):
+            return False
+    else:
+        if not is_polygon_segmentation(seg):
+            return False
+    return True
 
 
 class RejectedCocoAnnotation(CocoAnnotation):

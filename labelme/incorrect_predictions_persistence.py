@@ -3,16 +3,29 @@
 from __future__ import annotations
 
 import json
-from copy import deepcopy
 from pathlib import Path
 from typing import Literal
 
+import numpy as np
+import numpy.typing as npt
 from loguru import logger
+from supervision.dataset.formats.yolo import _polygons_to_masks
+from supervision.dataset.utils import rle_to_mask
 
+from labelme.coco_dataset import extract_labelme_polygons_from_coco_annotation
 from labelme.guided_review_mode import AnnotationPair
 from labelme.labelme_types import CocoAnnotation
 from labelme.labelme_types import RejectedCocoAnnotation
+from labelme.labelme_types import is_coco_annotation
+from labelme.labelme_types import is_compressed_rle
+from labelme.labelme_types import is_polygon_segmentation
 from labelme.shape import Shape
+from labelme.utils.shape import shape_to_mask
+
+# Minimum IoU change required to consider an edit "significant".
+# If pre-edit and post-edit masks overlap by more than this fraction,
+# the edit is considered a no-op and will not be saved.
+_EDIT_SIGNIFICANCE_IOU_THRESHOLD = 0.95
 
 
 class IncorrectPredictionsPersistence:
@@ -105,71 +118,17 @@ class IncorrectPredictionsPersistence:
             logger.error(f"Failed to save incorrect predictions: {e}")
             return False
 
-    def _extract_coco_annotation(self, shape: Shape) -> CocoAnnotation | None:
+    def _extract_coco_annotation(self, shape: Shape) -> dict | None:
         """Extract COCO annotation from a shape's other_data."""
         if not shape.other_data:
             return None
         return shape.other_data.get("original_annotation")
-
-    def _is_valid_coco_annotation(self, coco_ann: CocoAnnotation) -> bool:
-        """Check if a COCO annotation has all required fields."""
-        required_keys = ("id", "image_id", "category_id")
-        return all(key in coco_ann for key in required_keys)
 
     def _generate_annotation_id(self) -> int:
         """Generate a unique negative ID for GUI-created annotations."""
         id_ = self._next_generated_id
         self._next_generated_id -= 1
         return id_
-
-    def _create_coco_annotation_from_shape(
-        self, shape: Shape, frame_name: str
-    ) -> CocoAnnotation | None:
-        """
-        Create a COCO annotation from a GUI-created Shape.
-
-        Returns None if the shape cannot be converted (missing label, unknown category,
-        or unknown image).
-        """
-        if not shape.label:
-            logger.warning("Shape has no label, cannot create COCO annotation")
-            return None
-
-        category_id = self._category_id_by_name.get(shape.label)
-        if category_id is None:
-            logger.warning(
-                f"Unknown category '{shape.label}', cannot create COCO annotation"
-            )
-            return None
-
-        image_id = self._image_id_by_filename.get(frame_name)
-        if image_id is None:
-            logger.warning(
-                f"Unknown image '{frame_name}', cannot create COCO annotation"
-            )
-            return None
-
-        # Compute bounding box from shape points
-        bbox = shape.get_bounding_box()
-        if bbox is None:
-            logger.warning("Shape has no points, cannot create COCO annotation")
-            return None
-
-        x_min, y_min, x_max, y_max = bbox
-        width = x_max - x_min
-        height = y_max - y_min
-        area = width * height
-
-        coco_ann: CocoAnnotation = {
-            "id": self._generate_annotation_id(),
-            "image_id": image_id,
-            "category_id": category_id,
-            "bbox": [x_min, y_min, width, height],
-            "area": area,
-            "iscrowd": 0,
-        }
-
-        return coco_ann
 
     def _add_image_if_needed(
         self,
@@ -271,41 +230,35 @@ class IncorrectPredictionsPersistence:
 
         return True  # No annotations to save is not an error
 
-    def save_deleted_shapes(
-        self,
-        frame_name: str,
-        pair: AnnotationPair,
-        image_height: int,
-        image_width: int,
-    ) -> bool:
-        """Save deleted shapes to the incorrect predictions file in COCO format."""
-        coco_annotations = []
-
+    def _collect_coco_annotations(self, pair: AnnotationPair) -> list[CocoAnnotation]:
+        """Extract valid original COCO annotations from polygon shapes in a pair."""
+        coco_annotations: list[CocoAnnotation] = []
         for shape in pair.shapes:
+            if shape.shape_type != "polygon":
+                continue
+
             coco_ann = self._extract_coco_annotation(shape)
 
-            # If no existing COCO annotation, create one from the shape
+            # This is a shape that was manually created during the session
             if coco_ann is None:
-                coco_ann = self._create_coco_annotation_from_shape(shape, frame_name)
-                if coco_ann is None:
-                    logger.warning(
-                        f"Shape '{shape.label}' (group_id={pair.group_id}) "
-                        "could not be converted to COCO annotation, skipping"
-                    )
-                    continue
-
-            if not self._is_valid_coco_annotation(coco_ann):
-                logger.warning(
-                    f"Shape '{shape.label}' (group_id={pair.group_id}) "
-                    "has invalid COCO annotation (missing required fields), "
-                    "skipping"
-                )
                 continue
+
+            if not is_coco_annotation(coco_ann):
+                raise Exception(
+                    f"Shape '{shape.label}' (group_id={pair.group_id}) "
+                    "has an invalid COCO annotation."
+                )
 
             coco_annotations.append(coco_ann)
 
+        return coco_annotations
+
+    def save_deleted_shapes(
+        self, frame_name: str, pair: AnnotationPair, image_height: int, image_width: int
+    ) -> bool:
+        """Save deleted shapes to the incorrect predictions file in COCO format."""
         return self._save_coco_annotations(
-            coco_annotations=coco_annotations,
+            coco_annotations=self._collect_coco_annotations(pair),
             frame_name=frame_name,
             image_height=image_height,
             image_width=image_width,
@@ -323,13 +276,12 @@ class IncorrectPredictionsPersistence:
             group_id: The annotation group ID being edited
             shapes: List of Shape objects to capture
         """
-        coco_annotations = []
 
-        for shape in pair.shapes:
-            coco_ann = self._extract_coco_annotation(shape)
-            if coco_ann and self._is_valid_coco_annotation(coco_ann):
-                coco_annotations.append(deepcopy(coco_ann))
+        if pair.group_id in self._pending_edits:
+            # Original already captured; don't overwrite the baseline
+            return
 
+        coco_annotations = self._collect_coco_annotations(pair)
         if coco_annotations:
             self._pending_edits[pair.group_id] = coco_annotations
             logger.debug(
@@ -365,6 +317,102 @@ class IncorrectPredictionsPersistence:
             image_width=image_width,
             rejection_type="edited",
             group_id=group_id,
+        )
+
+    @staticmethod
+    def _coco_annotation_to_mask(
+        coco_ann: CocoAnnotation, image_height: int, image_width: int
+    ) -> npt.NDArray[np.bool_]:
+        """Decode a COCO annotation's segmentation to a binary mask."""
+        mask = np.zeros((image_height, image_width), dtype=bool)
+
+        segmentation = coco_ann.get("segmentation")
+        if is_compressed_rle(segmentation):
+            rle = np.array(segmentation["counts"])
+            h, w = segmentation["size"]
+            mask = rle_to_mask(rle=rle, resolution_wh=(w, h))
+            mask = mask.astype(bool)
+            assert mask.shape == (image_height, image_width)
+        elif is_polygon_segmentation(segmentation):
+            list_of_polygons = extract_labelme_polygons_from_coco_annotation(coco_ann)
+            if list_of_polygons:
+                masks = _polygons_to_masks(
+                    list_of_polygons, (image_width, image_height)
+                )
+                mask = np.max(masks, axis=0).astype(bool)
+
+        return mask
+
+    @staticmethod
+    def _shapes_to_mask(
+        shapes: list[Shape], group_id: int, image_height: int, image_width: int
+    ) -> npt.NDArray[np.bool_]:
+        """Convert canvas shapes for a given group_id to a combined binary mask."""
+        mask = np.zeros((image_height, image_width), dtype=bool)
+        for shape in shapes:
+            if shape.shape_type != "polygon":
+                continue
+
+            if shape.group_id != group_id:
+                continue
+
+            if shape.mask is not None:
+                if shape.mask.shape == (image_height, image_width):
+                    mask |= shape.mask.astype(bool)
+            elif shape.points:
+                points = [[p.x(), p.y()] for p in shape.points]
+                mask |= shape_to_mask(
+                    (image_height, image_width), points, shape_type="polygon"
+                )
+        return mask
+
+    def has_significant_changes(
+        self,
+        group_id: int,
+        current_shapes: list[Shape],
+        image_height: int,
+        image_width: int,
+    ) -> bool:
+        """Return True if the edit made significant changes (mask IoU < threshold).
+
+        Compares the original captured annotation mask with the current canvas
+        shapes. If the masks are nearly identical the edit is considered a no-op
+        and the annotation should not be saved.
+        """
+        if group_id not in self._pending_edits:
+            logger.debug(f"No pending edit for group_id={group_id}, assuming changed")
+            return True
+
+        # Build original mask from captured COCO annotations
+        original_mask = np.zeros((image_height, image_width), dtype=bool)
+        for ann in self._pending_edits[group_id]:
+            original_mask |= self._coco_annotation_to_mask(
+                ann, image_height, image_width
+            )
+
+        # Build current mask from canvas shapes with matching group_id
+        current_mask = self._shapes_to_mask(
+            current_shapes, group_id, image_height, image_width
+        )
+
+        union = np.logical_or(original_mask, current_mask).sum()
+        if union == 0:
+            return False  # Both masks empty — nothing to compare
+
+        intersection = np.logical_and(original_mask, current_mask).sum()
+        iou = float(intersection / union)
+
+        logger.debug(
+            f"Edit IoU for group_id={group_id}: {iou:.3f} "
+            f"(threshold={_EDIT_SIGNIFICANCE_IOU_THRESHOLD})"
+        )
+        return iou < _EDIT_SIGNIFICANCE_IOU_THRESHOLD
+
+    def cancel_pending_edit(self, group_id: int) -> None:
+        """Discard a pending edit capture without saving (no significant changes)."""
+        self._pending_edits.pop(group_id, None)
+        logger.debug(
+            f"Cancelled pending edit for group_id={group_id} (no significant change)"
         )
 
     def clear_pending_edits(self) -> None:

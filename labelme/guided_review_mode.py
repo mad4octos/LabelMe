@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass
 from dataclasses import field
 from pathlib import Path
@@ -123,18 +124,18 @@ class GuidedReviewManager(QtCore.QObject):
 
     def _group_shapes_by_id(self, shapes: list[Shape]) -> list[AnnotationPair]:
         """Group shapes by group_id into annotation pairs."""
-        groups: dict[int, list[Shape]] = {}
+        group_id_to_shapes: dict[int, list[Shape]] = defaultdict(list)
         for shape in shapes:
             if shape.group_id is not None:
-                if shape.group_id not in groups:
-                    groups[shape.group_id] = []
-                groups[shape.group_id].append(shape)
+                group_id_to_shapes[shape.group_id].append(shape)
 
         pairs = []
-        for gid in sorted(groups.keys()):
+        for gid in sorted(group_id_to_shapes.keys()):
             pairs.append(
                 AnnotationPair(
-                    group_id=gid, shapes=groups[gid], status=ReviewStatus.PENDING
+                    group_id=gid,
+                    shapes=group_id_to_shapes[gid],
+                    status=ReviewStatus.PENDING,
                 )
             )
         return pairs
