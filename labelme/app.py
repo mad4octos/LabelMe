@@ -1709,6 +1709,11 @@ class MainWindow(QtWidgets.QMainWindow):
             self.flag_widget.addItem(item)  # type: ignore[union-attr]
 
     def saveLabels(self, filename, coco=False):
+        """Serialize current shapes and flags to *filename*.
+
+        If coco=True, syncs to the loaded COCO dataset instead of writing a
+        standalone label file.
+        """
         lf = LabelFile()
 
         def format_shape(s):
