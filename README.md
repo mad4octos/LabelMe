@@ -13,6 +13,18 @@ This fork extends the original Labelme with enhanced COCO dataset support, a Gui
 - Dataset integrity verification on load
 - Ground-truth location overlay: displays ground truth attributes from COCO annotations as circles with metadata labels (location, object ID, extracted frame, original frame). These attributes come from the original .npy annotations file used to create the COCO annotations.
 
+**Saving & Exporting**
+
+This fork replaces the original Labelme save workflow with a COCO-centric one. The relevant File menu entries behave as follows:
+
+| Menu item | Behavior |
+|-----------|----------|
+| **Save** (`Ctrl+S`) | Stages the current frame's annotations in memory. Does **not** write to disk. |
+| **Save As** | Disabled — it wrote to the original Labelme JSON format, which is not used in the COCO workflow. |
+| **Save Automatically** | Disabled |
+| **Save With Image Data** | Disabled — embedding raw image bytes in the annotations file is not relevant for the COCO workflow. |
+| **Export COCO Annotations** | Writes all staged annotations to a COCO JSON file on disk. Run this when you are done editing a session. |
+
 **Guided Review Mode** ([details](#guided-review-mode))
 - Review bbox-polygon pairs grouped by Object ID
 - Keyboard-driven workflow: Confirm, Edit, or Delete annotations
