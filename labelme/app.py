@@ -379,6 +379,7 @@ class MainWindow(QtWidgets.QMainWindow):
             slot=self.enableSaveImageWithData,
             tip=self.tr("Save image data in label file"),
             checkable=True,
+            enabled=False,
             checked=self._config["store_data"],
         )
 
@@ -1749,7 +1750,6 @@ class MainWindow(QtWidgets.QMainWindow):
                     shapes=shapes,
                     im_height=image_height,
                     im_width=image_width,
-                    imageData=imageData,
                 )
             else:
                 assert self.imagePath
