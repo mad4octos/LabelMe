@@ -55,7 +55,7 @@ This fork replaces the original Labelme save workflow with a COCO-centric one. T
 
 Guided Review Mode provides a structured workflow for validating and reviewing annotations. 
 
-#### Starting Review Mode
+#### Starting Guided Review Mode
 
 1. Open a directory containing COCO annotated images
 2. Press `Ctrl+G` or click the button "Guided Review" found in the Tools bar
@@ -128,7 +128,7 @@ Hard negatives are training examples where the model made incorrect predictions 
 #### How It Works
 
 During Guided Review, when an annotation is **deleted** or **edited**:
-1. The original annotation (as it was before the modification) is captured
+1. The original annotation (as it was when loaded from disk) is captured
 2. It is saved to `incorrect_predictions.json` in the dataset directory
 3. The annotation includes a `rejection_type` field: `"deleted"` or `"edited"`
 
