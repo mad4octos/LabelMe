@@ -369,8 +369,8 @@ class MainWindow(QtWidgets.QMainWindow):
             text=self.tr("Save &Automatically"),
             slot=lambda x: self.actions.saveAuto.setChecked(x),
             tip=self.tr("Save automatically"),
-            checkable=True,
-            enabled=True,
+            checkable=False,
+            enabled=False,
         )
         saveAuto.setChecked(self._config["auto_save"])
 
