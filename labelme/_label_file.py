@@ -667,14 +667,8 @@ class LabelFile:
         shapes: list[dict],
         im_height: int,
         im_width: int,
-        imageData,
     ):
         """Convert Labelme shapes to COCO annotations and update the dataset."""
-        imageData = base64.b64encode(imageData).decode("utf-8")
-        im_height, im_width = self._check_image_height_and_width(
-            imageData, im_height, im_width
-        )
-
         resolution_wh = (im_width, im_height)
 
         category_name_to_id = {cat["name"]: cat["id"] for cat in dataset.categories}

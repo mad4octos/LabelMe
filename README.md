@@ -13,6 +13,18 @@ This fork extends the original Labelme with enhanced COCO dataset support, a Gui
 - Dataset integrity verification on load
 - Ground-truth location overlay: displays ground truth attributes from COCO annotations as circles with metadata labels (location, object ID, extracted frame, original frame). These attributes come from the original .npy annotations file used to create the COCO annotations.
 
+**Saving & Exporting**
+
+This fork replaces the original Labelme save workflow with a COCO-centric one. The relevant File menu entries behave as follows:
+
+| Menu item | Behavior |
+|-----------|----------|
+| **Save** (`Ctrl+S`) | Stages the current frame's annotations in memory. Does **not** write to disk. |
+| **Save As** | Disabled — it wrote to the original Labelme JSON format, which is not used in the COCO workflow. |
+| **Save Automatically** | Disabled |
+| **Save With Image Data** | Disabled — embedding raw image bytes in the annotations file is not relevant for the COCO workflow. |
+| **Export COCO Annotations** | Writes all staged annotations to a COCO JSON file on disk. Run this when you are done editing a session. |
+
 **Guided Review Mode** ([details](#guided-review-mode))
 - Review bbox-polygon pairs grouped by Object ID
 - Keyboard-driven workflow: Confirm, Edit, or Delete annotations
@@ -43,7 +55,7 @@ This fork extends the original Labelme with enhanced COCO dataset support, a Gui
 
 Guided Review Mode provides a structured workflow for validating and reviewing annotations. 
 
-#### Starting Review Mode
+#### Starting Guided Review Mode
 
 1. Open a directory containing COCO annotated images
 2. Press `Ctrl+G` or click the button "Guided Review" found in the Tools bar
@@ -116,7 +128,7 @@ Hard negatives are training examples where the model made incorrect predictions 
 #### How It Works
 
 During Guided Review, when an annotation is **deleted** or **edited**:
-1. The original annotation (as it was before the modification) is captured
+1. The original annotation (as it was when loaded from disk) is captured
 2. It is saved to `incorrect_predictions.json` in the dataset directory
 3. The annotation includes a `rejection_type` field: `"deleted"` or `"edited"`
 

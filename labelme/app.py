@@ -369,8 +369,8 @@ class MainWindow(QtWidgets.QMainWindow):
             text=self.tr("Save &Automatically"),
             slot=lambda x: self.actions.saveAuto.setChecked(x),
             tip=self.tr("Save automatically"),
-            checkable=True,
-            enabled=True,
+            checkable=False,
+            enabled=False,
         )
         saveAuto.setChecked(self._config["auto_save"])
 
@@ -379,6 +379,7 @@ class MainWindow(QtWidgets.QMainWindow):
             slot=self.enableSaveImageWithData,
             tip=self.tr("Save image data in label file"),
             checkable=True,
+            enabled=False,
             checked=self._config["store_data"],
         )
 
@@ -827,7 +828,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.addAction(review_action)
             self._review_widget.addAction(review_action)
 
-        self.on_shapes_present_actions = (saveAs, hideAll, showAll, toggleAll)
+        self.on_shapes_present_actions = (hideAll, showAll, toggleAll)
 
         self.draw_actions: list[tuple[str, QtWidgets.QAction]] = [
             ("polygon", createMode),
@@ -1708,6 +1709,11 @@ class MainWindow(QtWidgets.QMainWindow):
             self.flag_widget.addItem(item)  # type: ignore[union-attr]
 
     def saveLabels(self, filename, coco=False):
+        """Serialize current shapes and flags to *filename*.
+
+        If coco=True, syncs to the loaded COCO dataset instead of writing a
+        standalone label file.
+        """
         lf = LabelFile()
 
         def format_shape(s):
@@ -1749,7 +1755,6 @@ class MainWindow(QtWidgets.QMainWindow):
                     shapes=shapes,
                     im_height=image_height,
                     im_width=image_width,
-                    imageData=imageData,
                 )
             else:
                 assert self.imagePath
