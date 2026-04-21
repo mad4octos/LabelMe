@@ -827,7 +827,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.addAction(review_action)
             self._review_widget.addAction(review_action)
 
-        self.on_shapes_present_actions = (saveAs, hideAll, showAll, toggleAll)
+        self.on_shapes_present_actions = (hideAll, showAll, toggleAll)
 
         self.draw_actions: list[tuple[str, QtWidgets.QAction]] = [
             ("polygon", createMode),
