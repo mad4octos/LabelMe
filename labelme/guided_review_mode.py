@@ -140,7 +140,7 @@ class GuidedReviewManager(QtCore.QObject):
             )
         return pairs
 
-    def confirm_current(self) -> None:
+    def mark_current_pair_confirmed(self) -> None:
         """Mark current pair as confirmed and advance."""
         if self.current_pair:
             # If user was editing (TO_EDIT), mark as EDITED; otherwise CONFIRMED
@@ -155,13 +155,13 @@ class GuidedReviewManager(QtCore.QObject):
         else:
             logger.debug("Bad")
 
-    def mark_for_edit(self) -> None:
+    def mark_current_pair_to_edit(self) -> None:
         """Mark current pair as needing edit (user will edit manually)."""
         if self.current_pair:
             self.current_pair.status = ReviewStatus.TO_EDIT
             self._persist_current_status()
 
-    def mark_deleted(self) -> None:
+    def mark_current_pair_deleted(self) -> None:
         """Mark current pair as deleted and advance."""
         if self.current_pair:
             self.current_pair.status = ReviewStatus.DELETED
