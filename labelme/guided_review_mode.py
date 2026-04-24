@@ -10,6 +10,7 @@ from pathlib import Path
 from loguru import logger
 from PyQt5 import QtCore
 
+from labelme.review_persistence import FrameStatus
 from labelme.review_persistence import ReviewPersistence
 from labelme.review_persistence import ReviewStatus
 from labelme.shape import Shape
@@ -172,6 +173,13 @@ class GuidedReviewManager(QtCore.QObject):
         """Save current annotation status to disk."""
         if self._persistence and self._frame_filename and self.current_pair:
             frame_name = Path(self._frame_filename).name
+            
+            # Switch frame status from PENDING to IN_PROGRESS whenever a pair is either 
+            # confirmed, edited or deleted.
+            frame_state = self._persistence.get_frame_state(frame_name)
+            if frame_state.status == FrameStatus.PENDING:
+                self._persistence.mark_frame_in_progress(frame_name)
+            
             self._persistence.set_annotation_status(
                 frame_name=frame_name,
                 group_id=self.current_pair.group_id,
