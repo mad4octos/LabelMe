@@ -271,17 +271,12 @@ class GuidedReviewWidget(QtWidgets.QWidget):
         frame_progress_layout.addWidget(self._progress_bar)
         layout.addLayout(frame_progress_layout)
 
-        # Separator line
-        sep2 = QtWidgets.QFrame()
-        sep2.setFrameShape(QtWidgets.QFrame.HLine)
-        sep2.setFrameShadow(QtWidgets.QFrame.Sunken)
-        layout.addWidget(sep2)
 
         # Current annotation info
         info_frame = QtWidgets.QFrame()
         info_frame.setFrameStyle(QtWidgets.QFrame.StyledPanel | QtWidgets.QFrame.Raised)
         info_layout = QtWidgets.QVBoxLayout(info_frame)
-        info_layout.setContentsMargins(8, 8, 8, 8)
+        info_layout.setContentsMargins(0, 4, 4, 4)
         info_layout.setSpacing(4)
 
         self._frame_info_label = QtWidgets.QLabel(self.tr("Frame: --"))
@@ -292,6 +287,12 @@ class GuidedReviewWidget(QtWidgets.QWidget):
         info_layout.addWidget(self._group_id_label)
         info_layout.addWidget(self._label_info)
         layout.addWidget(info_frame)
+
+        # Separator line
+        sep2 = QtWidgets.QFrame()
+        sep2.setFrameShape(QtWidgets.QFrame.HLine)
+        sep2.setFrameShadow(QtWidgets.QFrame.Sunken)
+        layout.addWidget(sep2)
 
         # Action buttons in a grid
         btn_layout = QtWidgets.QGridLayout()
