@@ -10,6 +10,7 @@ from pathlib import Path
 from loguru import logger
 from PyQt5 import QtCore
 
+from labelme.review_persistence import FrameStatus
 from labelme.review_persistence import ReviewPersistence
 from labelme.review_persistence import ReviewStatus
 from labelme.shape import Shape
@@ -140,7 +141,7 @@ class GuidedReviewManager(QtCore.QObject):
             )
         return pairs
 
-    def confirm_current(self) -> None:
+    def mark_current_pair_confirmed(self) -> None:
         """Mark current pair as confirmed and advance."""
         if self.current_pair:
             # If user was editing (TO_EDIT), mark as EDITED; otherwise CONFIRMED
@@ -155,13 +156,13 @@ class GuidedReviewManager(QtCore.QObject):
         else:
             logger.debug("Bad")
 
-    def mark_for_edit(self) -> None:
+    def mark_current_pair_to_edit(self) -> None:
         """Mark current pair as needing edit (user will edit manually)."""
         if self.current_pair:
             self.current_pair.status = ReviewStatus.TO_EDIT
             self._persist_current_status()
 
-    def mark_deleted(self) -> None:
+    def mark_current_pair_deleted(self) -> None:
         """Mark current pair as deleted and advance."""
         if self.current_pair:
             self.current_pair.status = ReviewStatus.DELETED
@@ -172,6 +173,13 @@ class GuidedReviewManager(QtCore.QObject):
         """Save current annotation status to disk."""
         if self._persistence and self._frame_filename and self.current_pair:
             frame_name = Path(self._frame_filename).name
+            
+            # Switch frame status from PENDING to IN_PROGRESS whenever a pair is either 
+            # confirmed, edited or deleted.
+            frame_state = self._persistence.get_frame_state(frame_name)
+            if frame_state.status == FrameStatus.PENDING:
+                self._persistence.mark_frame_in_progress(frame_name)
+            
             self._persistence.set_annotation_status(
                 frame_name=frame_name,
                 group_id=self.current_pair.group_id,

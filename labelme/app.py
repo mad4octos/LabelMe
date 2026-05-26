@@ -2646,7 +2646,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _review_confirm(self) -> None:
         """Handle confirm action in review mode."""
         logger.debug("Confirming review")
-        self._review_manager.confirm_current()
+        self._review_manager.mark_current_pair_confirmed()
 
     def _review_edit(self) -> None:
         """Handle edit action - exits review mode for manual editing."""
@@ -2656,7 +2656,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._incorrect_predictions.capture_for_edit(pair)
 
         # Mark as TO_EDIT so we return to this annotation after editing
-        self._review_manager.mark_for_edit()
+        self._review_manager.mark_current_pair_to_edit()
 
         # Exit review mode so user can edit freely
         self._exit_review_mode()
@@ -2694,7 +2694,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.canvas.storeShapes()
             self.setDirty()
 
-        self._review_manager.mark_deleted()
+        self._review_manager.mark_current_pair_deleted()
 
     def _reset_frame_review(self) -> None:
         """Reset review progress for the current frame."""
