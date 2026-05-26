@@ -284,9 +284,11 @@ class GuidedReviewWidget(QtWidgets.QWidget):
         info_layout.setContentsMargins(8, 8, 8, 8)
         info_layout.setSpacing(4)
 
+        self._frame_info_label = QtWidgets.QLabel(self.tr("Frame: --"))
         self._group_id_label = QtWidgets.QLabel(self.tr("ObjID: --"))
         self._label_info = QtWidgets.QLabel(self.tr("Label: --"))
 
+        info_layout.addWidget(self._frame_info_label)
         info_layout.addWidget(self._group_id_label)
         info_layout.addWidget(self._label_info)
         layout.addWidget(info_frame)
@@ -357,6 +359,12 @@ class GuidedReviewWidget(QtWidgets.QWidget):
             self._progress_bar.setValue(int((current / total) * 100))
         else:
             self._progress_bar.setValue(0)
+
+    def update_frame_info(self, frame_name: str, frame_index: int, total_frames: int):
+        """Update the displayed frame name and position."""
+        self._frame_info_label.setText(
+            f"{self.tr('Frame')}: {frame_name} ({frame_index} / {total_frames})"
+        )
 
     def update_current_pair(self, pair: AnnotationPair | None):
         """Update display for current annotation pair."""
