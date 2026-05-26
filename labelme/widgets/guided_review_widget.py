@@ -286,11 +286,9 @@ class GuidedReviewWidget(QtWidgets.QWidget):
 
         self._group_id_label = QtWidgets.QLabel(self.tr("ObjID: --"))
         self._label_info = QtWidgets.QLabel(self.tr("Label: --"))
-        self._shape_count = QtWidgets.QLabel(self.tr("Shapes: 0"))
 
         info_layout.addWidget(self._group_id_label)
         info_layout.addWidget(self._label_info)
-        info_layout.addWidget(self._shape_count)
         layout.addWidget(info_frame)
 
         # Action buttons in a grid
@@ -365,7 +363,6 @@ class GuidedReviewWidget(QtWidgets.QWidget):
         if pair is None:
             self._group_id_label.setText(self.tr("ObjID: --"))
             self._label_info.setText(self.tr("Label: --"))
-            self._shape_count.setText(self.tr("Shapes: 0"))
             self.set_buttons_enabled(False)
             return
 
@@ -376,10 +373,6 @@ class GuidedReviewWidget(QtWidgets.QWidget):
             label = pair.shapes[0].label or "--"
             self._label_info.setText(f"{self.tr('Label')}: {label}")
 
-        shape_types = [s.shape_type for s in pair.shapes]
-        self._shape_count.setText(
-            f"{self.tr('Shapes')}: {len(pair.shapes)} ({', '.join(shape_types)})"
-        )
         self.set_buttons_enabled(True)
 
     def set_buttons_enabled(self, enabled: bool):
