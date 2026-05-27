@@ -5,7 +5,7 @@ from PyQt5 import QtWidgets
 from PyQt5.QtGui import QColor
 
 from labelme.guided_review_mode import AnnotationPair
-from labelme.review_persistence import ReviewStatus
+from labelme.review_persistence import AnnotationReviewStatus
 
 
 class ReviewSummaryDialog(QtWidgets.QDialog):
@@ -168,11 +168,11 @@ class ReviewSummaryDialog(QtWidgets.QDialog):
         layout.addWidget(current_title)
 
         # Count entities by status
-        pending = frame_summary.get(ReviewStatus.PENDING.name, 0)
-        to_edit = frame_summary.get(ReviewStatus.TO_EDIT.name, 0)
-        confirmed = frame_summary.get(ReviewStatus.CONFIRMED.name, 0)
-        edited = frame_summary.get(ReviewStatus.EDITED.name, 0)
-        deleted = frame_summary.get(ReviewStatus.DELETED.name, 0)
+        pending = frame_summary.get(AnnotationReviewStatus.PENDING.name, 0)
+        to_edit = frame_summary.get(AnnotationReviewStatus.TO_EDIT.name, 0)
+        confirmed = frame_summary.get(AnnotationReviewStatus.CONFIRMED.name, 0)
+        edited = frame_summary.get(AnnotationReviewStatus.EDITED.name, 0)
+        deleted = frame_summary.get(AnnotationReviewStatus.DELETED.name, 0)
 
         total_entities = pending + to_edit + confirmed + edited + deleted
 
@@ -490,9 +490,9 @@ class MissedAnnotationDialog(QtWidgets.QDialog):
 
     def set_summary(self, summary: dict[str, int]):
         """Set the review summary to display."""
-        confirmed = summary.get(ReviewStatus.CONFIRMED.name, 0)
-        edited = summary.get(ReviewStatus.EDITED.name, 0)
-        deleted = summary.get(ReviewStatus.DELETED.name, 0)
+        confirmed = summary.get(AnnotationReviewStatus.CONFIRMED.name, 0)
+        edited = summary.get(AnnotationReviewStatus.EDITED.name, 0)
+        deleted = summary.get(AnnotationReviewStatus.DELETED.name, 0)
         text = (
             f" - {self.tr('Confirmed')}: {confirmed}\n"
             f" - {self.tr('Edited')}: {edited}\n"

@@ -12,7 +12,7 @@ from pathlib import Path
 from loguru import logger
 
 
-class ReviewStatus(Enum):
+class AnnotationReviewStatus(Enum):
     """Status of an annotation pair during review."""
 
     PENDING = "pending"
@@ -34,7 +34,7 @@ class FrameStatus(Enum):
 class AnnotationReviewState:
     """Review state for a single annotation (group_id)."""
 
-    status: ReviewStatus = ReviewStatus.PENDING
+    status: AnnotationReviewStatus = AnnotationReviewStatus.PENDING
     reviewed_at: str | None = None
 
 
@@ -78,7 +78,7 @@ class ReviewPersistence:
                 annotations = {}
                 for gid, ann_data in frame_data.get("annotations", {}).items():
                     annotations[gid] = AnnotationReviewState(
-                        status=ReviewStatus(ann_data.get("status", "pending")),
+                        status=AnnotationReviewStatus(ann_data.get("status", "pending")),
                         reviewed_at=ann_data.get("reviewed_at"),
                     )
 
@@ -129,7 +129,7 @@ class ReviewPersistence:
         return self._frames[frame_name]
 
     def set_annotation_status(
-        self, frame_name: str, group_id: int, status: ReviewStatus
+        self, frame_name: str, group_id: int, status: AnnotationReviewStatus
     ) -> None:
         """Update status for a specific annotation and auto-save."""
         frame = self.get_frame_state(frame_name)
@@ -203,11 +203,11 @@ class ReviewPersistence:
 
                 # Count annotation statuses
                 for ann in frame_state.annotations.values():
-                    if ann.status == ReviewStatus.CONFIRMED:
+                    if ann.status == AnnotationReviewStatus.CONFIRMED:
                         summary["confirmed"] += 1
-                    elif ann.status == ReviewStatus.EDITED:
+                    elif ann.status == AnnotationReviewStatus.EDITED:
                         summary["edited"] += 1
-                    elif ann.status == ReviewStatus.DELETED:
+                    elif ann.status == AnnotationReviewStatus.DELETED:
                         summary["deleted"] += 1
             else:
                 summary["pending"] += 1
