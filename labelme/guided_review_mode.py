@@ -104,7 +104,38 @@ class GuidedReviewManager(QtCore.QObject):
         self._active = True
         self.reviewModeChanged.emit(True)
         self._emit_current_state()
+
+        self._maybe_trigger_frame_completion(filename)
+
         return True
+
+    def _maybe_trigger_frame_completion(self, filename: str) -> None:
+        """
+        Emit frameReviewCompleted (deferred) if all pairs are already reviewed
+        and the frame is not yet marked COMPLETED.
+
+        Called at the end of start_review() to handle frames whose annotations
+        were pre-confirmed (e.g. via auto_confirm_user_shape) before the user
+        ever entered review mode.
+
+        The emission is deferred via QTimer so that _on_frame_review_completed()
+        (which shows a blocking dialog and may call _exit_review_mode()) runs
+        after start_review() returns — a synchronous emit would clear _active
+        and _annotation_pairs while still inside this method.
+
+        Skipped when the frame is already COMPLETED so reopening a finished
+        frame doesn't re-show the missed-annotation dialog.
+        """
+        if not (
+            self._current_index >= len(self._annotation_pairs)
+            and self._annotation_pairs
+            and self._persistence
+        ):
+            return
+        frame_name = Path(filename).name
+        frame_state = self._persistence.get_frame_state(frame_name)
+        if frame_state.status != FrameStatus.COMPLETED:
+            QtCore.QTimer.singleShot(0, self.frameReviewCompleted.emit)
 
     def _find_first_pending_index(self) -> int:
         """Find index of first annotation needing review (PENDING or TO_EDIT)."""
@@ -206,6 +237,21 @@ class GuidedReviewManager(QtCore.QObject):
         for pair in self._annotation_pairs:
             summary[pair.status.name] += 1
         return summary
+
+    def auto_confirm_user_shape(self, frame_filename: str, group_id: int) -> None:
+        """Mark a user-drawn shape as confirmed in the Guided Review persistence layer"""
+        if not self._persistence:
+            return
+        frame_name = Path(frame_filename).name
+        frame_state = self._persistence.get_frame_state(frame_name)
+        if str(group_id) not in frame_state.annotations:
+            if frame_state.status == FrameStatus.PENDING:
+                self._persistence.mark_frame_in_progress(frame_name)
+            self._persistence.set_annotation_status(
+                frame_name=frame_name,
+                group_id=group_id,
+                status=AnnotationReviewStatus.CONFIRMED,
+            )
 
     def complete_frame_review(self) -> None:
         """Mark current frame as fully reviewed."""
