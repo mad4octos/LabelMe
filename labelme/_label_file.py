@@ -352,17 +352,16 @@ class LabelFile:
         return [bbox_x, bbox_y, bbox_width, bbox_height]
 
     @staticmethod
-    def _get_next_annotation_id(dataset: LazyCOCODataset) -> int:
-        """Find the first available annotation ID."""
-        existing_ids = {
-            ann["id"]
-            for anns in dataset.annotations_by_image_id.values()
-            for ann in anns
-        }
-        ann_id = 1
-        while ann_id in existing_ids:
-            ann_id += 1
-        return ann_id
+    def _max_annotation_id(dataset: LazyCOCODataset) -> int:
+        """Return the current maximum annotation ID in the dataset (0 if empty)."""
+        return max(
+            (
+                ann["id"]
+                for anns in dataset.annotations_by_image_id.values()
+                for ann in anns
+            ),
+            default=0,
+        )
 
     @staticmethod
     def _convert_polygons_to_coco_segmentation(
@@ -438,10 +437,10 @@ class LabelFile:
     def _create_annotation_from_shape_group(
         self,
         group_shapes: list[dict],
-        dataset: LazyCOCODataset,
         image_id: int,
         category_name_to_id: dict[str, int],
         resolution_wh: tuple[int, int],
+        ann_id: int,
     ) -> CocoAnnotation:
         """Create a COCO annotation from a group of shapes (polygon + rectangle).
 
@@ -489,7 +488,6 @@ class LabelFile:
             list_of_polygons, resolution_wh, iscrowd=iscrowd
         )
 
-        ann_id = self._get_next_annotation_id(dataset)
         coco_annotation = CocoAnnotation(
             id=ann_id,
             image_id=image_id,
@@ -640,6 +638,7 @@ class LabelFile:
         while COCO uses a single annotation with bbox + segmentation fields.
         User edits to rectangles/polygons in Labelme are synced back to COCO.
         """
+        next_id = self._max_annotation_id(dataset) + 1
         new_annotations: list[CocoAnnotation] = []
         for group_id in sorted(data_by_group_id):
             annotation, group_shapes = data_by_group_id[group_id]
@@ -648,8 +647,13 @@ class LabelFile:
             # they had no COCO annotation attached.
             if annotation is None:
                 annotation = self._create_annotation_from_shape_group(
-                    group_shapes, dataset, image_id, category_name_to_id, resolution_wh
+                    group_shapes,
+                    image_id,
+                    category_name_to_id,
+                    resolution_wh,
+                    ann_id=next_id,
                 )
+                next_id += 1
 
             else:
                 annotation = self._update_annotation_from_shapes(
@@ -659,6 +663,62 @@ class LabelFile:
             new_annotations.append(annotation)
 
         return new_annotations
+
+    @staticmethod
+    def find_label_mismatches(
+        current_frame_shapes: list[dict],
+        current_image_id: int,
+        dataset: LazyCOCODataset,
+    ) -> list[dict]:
+        """Return ObjID/label conflicts between the current frame and other frames.
+
+        Each list entry in the returned list is:
+          {"object_id": int, "current_label": str, "existing_label": str}
+
+        Only the first conflicting label found per ObjID is reported.
+        """
+
+        # Build a mapping between current frame shapes' object_ids and labels
+        current_frame_objid_to_label: dict[int, str] = {}
+        for shape in current_frame_shapes:
+            object_id = shape.get("group_id")
+            shape_type = shape.get("shape_type")
+            if object_id is None or shape_type not in ("polygon", "rectangle"):
+                continue
+
+            # Prefer polygon over rectangle; only set if not already set by a polygon
+            if object_id not in current_frame_objid_to_label or shape_type == "polygon":
+                current_frame_objid_to_label[object_id] = shape["label"]
+
+        # Flag objects whose label in other frames conflicts with the current frame.
+        conflicts: list[dict] = []
+        seen_obj_ids: set[int] = set()
+        for image_id, annotations in dataset.annotations_by_image_id.items():
+            if image_id == current_image_id:
+                continue
+
+            for ann in annotations:
+                object_id = ann.get("attributes", {}).get("ObjID")
+
+                if (
+                    object_id not in current_frame_objid_to_label
+                    or object_id in seen_obj_ids
+                ):
+                    continue
+
+                label = dataset.category_id_to_name.get(ann.get("category_id"), "")
+                current_label = current_frame_objid_to_label[object_id]
+                if label and label != current_label:
+                    conflicts.append(
+                        {
+                            "obj_id": object_id,
+                            "existing_label": label,
+                            "current_label": current_label,
+                        }
+                    )
+                    seen_obj_ids.add(object_id)
+
+        return conflicts
 
     def _sync_labelme_shapes_to_coco_dataset(
         self,
@@ -671,12 +731,14 @@ class LabelFile:
         """Convert Labelme shapes to COCO annotations and update the dataset."""
         resolution_wh = (im_width, im_height)
 
-        category_name_to_id = {cat["name"]: cat["id"] for cat in dataset.categories}
-
         data_by_group_id = self._group_shapes_by_group_id(shapes)
 
         new_annotations = self._rebuild_coco_annotations(
-            data_by_group_id, dataset, image_id, category_name_to_id, resolution_wh
+            data_by_group_id,
+            dataset,
+            image_id,
+            dataset.category_name_to_id,
+            resolution_wh,
         )
 
         # Update the dataset's annotations for this image

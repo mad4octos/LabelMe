@@ -1749,6 +1749,11 @@ class MainWindow(QtWidgets.QMainWindow):
             if coco:
                 image_filename = Path(self.imagePath).name
                 image_id = self.dataset.image_id_by_filename[image_filename]
+                mismatches = LabelFile.find_label_mismatches(
+                    shapes, image_id, self.dataset
+                )
+                if mismatches and not self._confirm_label_mismatches(mismatches):
+                    return False
                 lf._sync_labelme_shapes_to_coco_dataset(
                     self.dataset,
                     image_id,
@@ -1786,6 +1791,61 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.tr("Error saving label data"), self.tr("<b>%s</b>") % e
             )
             return False
+
+    def _confirm_label_mismatches(self, mismatches: list[dict]) -> bool:
+        """Show a warning dialog for ObjID/label conflicts and act on the user's choice.
+
+        Returns True if the save should proceed, False if the user cancelled.
+        """
+        lines = []
+        for m in mismatches:
+            lines.append(
+                f'  • ObjID {m["obj_id"]}: currently "{m["current_label"]}",'
+                f' previously "{m["existing_label"]}" in other frames'
+            )
+        detail = "\n".join(lines)
+        msg = (
+            "The following ObjIDs have a different label in this frame than in the rest "
+            "of the dataset:\n\n"
+            f"{detail}\n\n"
+            "How would you like to proceed?"
+        )
+        box = QtWidgets.QMessageBox(self)
+        box.setWindowTitle(self.tr("Label mismatch detected"))
+        box.setText(msg)
+        box.setInformativeText(
+            self.tr(
+                "<b>Update all frames</b> — change the label for this ObjID in every"
+                " frame to match this one.<br>"
+                "<b>Keep current frame only</b> — save this frame as-is; other frames"
+                " are left unchanged.<br>"
+                "<b>Cancel</b> — discard this save and go back to editing."
+            )
+        )
+        box.setIcon(QtWidgets.QMessageBox.Warning)
+        update_all_btn = box.addButton(
+            self.tr("Update all frames"), QtWidgets.QMessageBox.AcceptRole
+        )
+        box.addButton(self.tr("Keep current frame only"), QtWidgets.QMessageBox.NoRole)
+        cancel_btn = box.addButton(QtWidgets.QMessageBox.Cancel)
+        box.setDefaultButton(cancel_btn)
+        box.exec_()
+
+        clicked = box.clickedButton()
+        if clicked is cancel_btn:
+            return False
+        elif clicked is update_all_btn:
+            for m in mismatches:
+                self._apply_label_to_all_frames(m["obj_id"], m["current_label"])
+        return True
+
+    def _apply_label_to_all_frames(self, obj_id: int, new_label: str) -> None:
+        """Update category_id for every annotation with the given ObjID across all frames."""
+        new_cat_id = self.dataset.category_name_to_id[new_label]
+        for anns in self.dataset.annotations_by_image_id.values():
+            for ann in anns:
+                if ann.get("attributes", {}).get("ObjID") == obj_id:
+                    ann["category_id"] = new_cat_id
 
     def duplicateSelectedShape(self):
         self.copySelectedShape()
