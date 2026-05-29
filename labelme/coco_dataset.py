@@ -113,6 +113,9 @@ class LazyCOCODataset:
         self.category_id_to_name: dict[int, str] = {
             cat["id"]: cat["name"] for cat in self.categories
         }
+        self.category_name_to_id: dict[str, int] = {
+            v: k for k, v in self.category_id_to_name.items()
+        }
 
         self.annotations_by_image_id: dict[int, list[CocoAnnotation]] = (
             group_coco_annotations_by_image_id(self.coco_data["annotations"])
