@@ -1879,6 +1879,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
             self._updateGroupBbox(shape, flags)
 
+            # Make the user-drawn shape appear as "confirmed" by default
+            if shape.group_id is not None and self.filename:
+                self._review_manager.auto_confirm_user_shape(
+                    self.filename, shape.group_id
+                )
+
             self.actions.editMode.setEnabled(True)
             self.actions.undoLastPoint.setEnabled(False)
             self.actions.undo.setEnabled(True)

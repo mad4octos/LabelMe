@@ -12,7 +12,7 @@ from PyQt5 import QtCore
 
 from labelme.review_persistence import FrameStatus
 from labelme.review_persistence import ReviewPersistence
-from labelme.review_persistence import ReviewStatus
+from labelme.review_persistence import AnnotationReviewStatus
 from labelme.shape import Shape
 
 
@@ -22,7 +22,7 @@ class AnnotationPair:
 
     group_id: int
     shapes: list[Shape] = field(default_factory=list)
-    status: ReviewStatus = ReviewStatus.PENDING
+    status: AnnotationReviewStatus = AnnotationReviewStatus.PENDING
 
 
 class GuidedReviewManager(QtCore.QObject):
@@ -104,12 +104,43 @@ class GuidedReviewManager(QtCore.QObject):
         self._active = True
         self.reviewModeChanged.emit(True)
         self._emit_current_state()
+
+        self._maybe_trigger_frame_completion(filename)
+
         return True
+
+    def _maybe_trigger_frame_completion(self, filename: str) -> None:
+        """
+        Emit frameReviewCompleted (deferred) if all pairs are already reviewed
+        and the frame is not yet marked COMPLETED.
+
+        Called at the end of start_review() to handle frames whose annotations
+        were pre-confirmed (e.g. via auto_confirm_user_shape) before the user
+        ever entered review mode.
+
+        The emission is deferred via QTimer so that _on_frame_review_completed()
+        (which shows a blocking dialog and may call _exit_review_mode()) runs
+        after start_review() returns — a synchronous emit would clear _active
+        and _annotation_pairs while still inside this method.
+
+        Skipped when the frame is already COMPLETED so reopening a finished
+        frame doesn't re-show the missed-annotation dialog.
+        """
+        if not (
+            self._current_index >= len(self._annotation_pairs)
+            and self._annotation_pairs
+            and self._persistence
+        ):
+            return
+        frame_name = Path(filename).name
+        frame_state = self._persistence.get_frame_state(frame_name)
+        if frame_state.status != FrameStatus.COMPLETED:
+            QtCore.QTimer.singleShot(0, self.frameReviewCompleted.emit)
 
     def _find_first_pending_index(self) -> int:
         """Find index of first annotation needing review (PENDING or TO_EDIT)."""
         for i, pair in enumerate(self._annotation_pairs):
-            if pair.status in (ReviewStatus.PENDING, ReviewStatus.TO_EDIT):
+            if pair.status in (AnnotationReviewStatus.PENDING, AnnotationReviewStatus.TO_EDIT):
                 return i
         # All reviewed - position at end to trigger completion
         return len(self._annotation_pairs)
@@ -136,7 +167,7 @@ class GuidedReviewManager(QtCore.QObject):
                 AnnotationPair(
                     group_id=gid,
                     shapes=group_id_to_shapes[gid],
-                    status=ReviewStatus.PENDING,
+                    status=AnnotationReviewStatus.PENDING,
                 )
             )
         return pairs
@@ -145,12 +176,12 @@ class GuidedReviewManager(QtCore.QObject):
         """Mark current pair as confirmed and advance."""
         if self.current_pair:
             # If user was editing (TO_EDIT), mark as EDITED; otherwise CONFIRMED
-            if self.current_pair.status == ReviewStatus.TO_EDIT:
-                self.current_pair.status = ReviewStatus.EDITED
+            if self.current_pair.status == AnnotationReviewStatus.TO_EDIT:
+                self.current_pair.status = AnnotationReviewStatus.EDITED
                 # Emit signal so incorrect predictions can be finalized
                 self.editConfirmed.emit(self.current_pair.group_id)
             else:
-                self.current_pair.status = ReviewStatus.CONFIRMED
+                self.current_pair.status = AnnotationReviewStatus.CONFIRMED
             self._persist_current_status()
             self._advance()
         else:
@@ -159,13 +190,13 @@ class GuidedReviewManager(QtCore.QObject):
     def mark_current_pair_to_edit(self) -> None:
         """Mark current pair as needing edit (user will edit manually)."""
         if self.current_pair:
-            self.current_pair.status = ReviewStatus.TO_EDIT
+            self.current_pair.status = AnnotationReviewStatus.TO_EDIT
             self._persist_current_status()
 
     def mark_current_pair_deleted(self) -> None:
         """Mark current pair as deleted and advance."""
         if self.current_pair:
-            self.current_pair.status = ReviewStatus.DELETED
+            self.current_pair.status = AnnotationReviewStatus.DELETED
             self._persist_current_status()
             self._advance()
 
@@ -202,10 +233,25 @@ class GuidedReviewManager(QtCore.QObject):
 
     def get_review_summary(self) -> dict[str, int]:
         """Get summary of review statuses."""
-        summary: dict[str, int] = {status.name: 0 for status in ReviewStatus}
+        summary: dict[str, int] = {status.name: 0 for status in AnnotationReviewStatus}
         for pair in self._annotation_pairs:
             summary[pair.status.name] += 1
         return summary
+
+    def auto_confirm_user_shape(self, frame_filename: str, group_id: int) -> None:
+        """Mark a user-drawn shape as confirmed in the Guided Review persistence layer"""
+        if not self._persistence:
+            return
+        frame_name = Path(frame_filename).name
+        frame_state = self._persistence.get_frame_state(frame_name)
+        if str(group_id) not in frame_state.annotations:
+            if frame_state.status == FrameStatus.PENDING:
+                self._persistence.mark_frame_in_progress(frame_name)
+            self._persistence.set_annotation_status(
+                frame_name=frame_name,
+                group_id=group_id,
+                status=AnnotationReviewStatus.CONFIRMED,
+            )
 
     def complete_frame_review(self) -> None:
         """Mark current frame as fully reviewed."""
@@ -220,7 +266,7 @@ class GuidedReviewManager(QtCore.QObject):
 
         # Reset all annotation statuses to PENDING
         for pair in self._annotation_pairs:
-            pair.status = ReviewStatus.PENDING
+            pair.status = AnnotationReviewStatus.PENDING
 
         # Clear persisted state for this frame
         if self._persistence and self._frame_filename:
