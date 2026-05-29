@@ -675,12 +675,14 @@ class LabelFile:
         """Convert Labelme shapes to COCO annotations and update the dataset."""
         resolution_wh = (im_width, im_height)
 
-        category_name_to_id = {cat["name"]: cat["id"] for cat in dataset.categories}
-
         data_by_group_id = self._group_shapes_by_group_id(shapes)
 
         new_annotations = self._rebuild_coco_annotations(
-            data_by_group_id, dataset, image_id, category_name_to_id, resolution_wh
+            data_by_group_id,
+            dataset,
+            image_id,
+            dataset.category_name_to_id,
+            resolution_wh,
         )
 
         # Update the dataset's annotations for this image
