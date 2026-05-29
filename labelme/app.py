@@ -2565,6 +2565,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_current_pair_changed(self, pair: AnnotationPair | None) -> None:
         """Handle change to current review pair."""
+        if self.filename:
+            self._review_widget.update_frame_info(
+                frame_name=Path(self.filename).name,
+                frame_index=self.fileListWidget.currentRow() + 1,
+                total_frames=self.fileListWidget.count(),
+            )
         self._review_widget.update_current_pair(pair)
 
         if pair:

@@ -271,27 +271,28 @@ class GuidedReviewWidget(QtWidgets.QWidget):
         frame_progress_layout.addWidget(self._progress_bar)
         layout.addLayout(frame_progress_layout)
 
-        # Separator line
-        sep2 = QtWidgets.QFrame()
-        sep2.setFrameShape(QtWidgets.QFrame.HLine)
-        sep2.setFrameShadow(QtWidgets.QFrame.Sunken)
-        layout.addWidget(sep2)
 
         # Current annotation info
         info_frame = QtWidgets.QFrame()
         info_frame.setFrameStyle(QtWidgets.QFrame.StyledPanel | QtWidgets.QFrame.Raised)
         info_layout = QtWidgets.QVBoxLayout(info_frame)
-        info_layout.setContentsMargins(8, 8, 8, 8)
+        info_layout.setContentsMargins(0, 4, 4, 4)
         info_layout.setSpacing(4)
 
+        self._frame_info_label = QtWidgets.QLabel(self.tr("Frame: --"))
         self._group_id_label = QtWidgets.QLabel(self.tr("ObjID: --"))
         self._label_info = QtWidgets.QLabel(self.tr("Label: --"))
-        self._shape_count = QtWidgets.QLabel(self.tr("Shapes: 0"))
 
+        info_layout.addWidget(self._frame_info_label)
         info_layout.addWidget(self._group_id_label)
         info_layout.addWidget(self._label_info)
-        info_layout.addWidget(self._shape_count)
         layout.addWidget(info_frame)
+
+        # Separator line
+        sep2 = QtWidgets.QFrame()
+        sep2.setFrameShape(QtWidgets.QFrame.HLine)
+        sep2.setFrameShadow(QtWidgets.QFrame.Sunken)
+        layout.addWidget(sep2)
 
         # Action buttons in a grid
         btn_layout = QtWidgets.QGridLayout()
@@ -360,12 +361,17 @@ class GuidedReviewWidget(QtWidgets.QWidget):
         else:
             self._progress_bar.setValue(0)
 
+    def update_frame_info(self, frame_name: str, frame_index: int, total_frames: int):
+        """Update the displayed frame name and position."""
+        self._frame_info_label.setText(
+            f"{self.tr('Frame')}: {frame_name} ({frame_index} / {total_frames})"
+        )
+
     def update_current_pair(self, pair: AnnotationPair | None):
         """Update display for current annotation pair."""
         if pair is None:
             self._group_id_label.setText(self.tr("ObjID: --"))
             self._label_info.setText(self.tr("Label: --"))
-            self._shape_count.setText(self.tr("Shapes: 0"))
             self.set_buttons_enabled(False)
             return
 
@@ -376,10 +382,6 @@ class GuidedReviewWidget(QtWidgets.QWidget):
             label = pair.shapes[0].label or "--"
             self._label_info.setText(f"{self.tr('Label')}: {label}")
 
-        shape_types = [s.shape_type for s in pair.shapes]
-        self._shape_count.setText(
-            f"{self.tr('Shapes')}: {len(pair.shapes)} ({', '.join(shape_types)})"
-        )
         self.set_buttons_enabled(True)
 
     def set_buttons_enabled(self, enabled: bool):
