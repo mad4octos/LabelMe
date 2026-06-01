@@ -341,14 +341,19 @@ class LabelFile:
         return imageHeight, imageWidth
 
     @staticmethod
-    def _calculate_bbox_from_points(points: ShapePolygon) -> list[float]:
+    def _calculate_bbox_from_points(
+        points: ShapePolygon,
+        image_wh: tuple[int, int],
+    ) -> list[float]:
         """Calculate COCO format bbox [x, y, width, height] from a list of points."""
         xs = [p[0] for p in points]
         ys = [p[1] for p in points]
-        bbox_x = round(min(xs), 0)
-        bbox_y = round(min(ys), 0)
-        bbox_width = round(max(xs) - bbox_x, 0)
-        bbox_height = round(max(ys) - bbox_y, 0)
+        w = float(image_wh[0])
+        h = float(image_wh[1])
+        bbox_x = max(0.0, round(min(xs), 0))
+        bbox_y = max(0.0, round(min(ys), 0))
+        bbox_width = max(0.0, min(w - bbox_x, round(max(xs) - bbox_x, 0)))
+        bbox_height = max(0.0, min(h - bbox_y, round(max(ys) - bbox_y, 0)))
         return [bbox_x, bbox_y, bbox_width, bbox_height]
 
     @staticmethod
@@ -472,11 +477,13 @@ class LabelFile:
 
         # Calculate bbox from rectangle shape if available, else from polygons
         if rectangle_shape is not None:
-            bbox = self._calculate_bbox_from_points(rectangle_shape["points"])
+            bbox = self._calculate_bbox_from_points(
+                rectangle_shape["points"], resolution_wh
+            )
         else:
             # Combine all polygon points to compute bbox
             all_points = [p for ps in polygon_shapes for p in ps["points"]]
-            bbox = self._calculate_bbox_from_points(all_points)
+            bbox = self._calculate_bbox_from_points(all_points, resolution_wh)
 
         bbox_x, bbox_y, bbox_width, bbox_height = bbox
 
@@ -518,7 +525,7 @@ class LabelFile:
         # Update bbox from rectangle shape (if exists)
         if rectangle_shape:
             annotation["bbox"] = self._calculate_bbox_from_points(
-                rectangle_shape["points"]
+                rectangle_shape["points"], resolution_wh
             )
 
         # Update or add segmentation from polygon shapes
