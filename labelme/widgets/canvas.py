@@ -818,10 +818,10 @@ class Canvas(QtWidgets.QWidget):
         max_y = max(p.y() for p in all_points)
 
         # Apply padding
-        min_x -= self.bbox_padding
-        max_x += self.bbox_padding
-        min_y -= self.bbox_padding
-        max_y += self.bbox_padding
+        min_x = max(0.0, min_x - self.bbox_padding)
+        max_x = min(self.pixmap.width() - 1.0, max_x + self.bbox_padding)
+        min_y = max(0.0, min_y - self.bbox_padding)
+        max_y = min(self.pixmap.height() - 1.0, max_y + self.bbox_padding)
 
         # Update all rectangles with the same group_id
         for shape in self.shapes:
