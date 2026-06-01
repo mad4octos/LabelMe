@@ -1721,7 +1721,7 @@ class MainWindow(QtWidgets.QMainWindow):
             data.update(
                 dict(
                     label=s.label,
-                    points=[(p.x(), p.y()) for p in s.points],
+                    points=[(round(p.x(), 3), round(p.y(), 3)) for p in s.points],
                     group_id=s.group_id,
                     description=s.description,
                     shape_type=s.shape_type,
