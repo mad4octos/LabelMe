@@ -3245,7 +3245,12 @@ class MainWindow(QtWidgets.QMainWindow):
             )
 
         if images_dir.exists() and annotations_file is not None:
-            self.dataset = LazyCOCODataset(images_dir, annotations_file)
+            expected_category_names = self._config.get("labels") or []
+            self.dataset = LazyCOCODataset(
+                images_dir,
+                annotations_file,
+                expected_category_names=expected_category_names,
+            )
             # Show warning dialog if dataset validation failed
             if not self.dataset.validation_results["valid"]:
                 if warning_msg := self.dataset.get_validation_warning_message():
@@ -3255,6 +3260,21 @@ class MainWindow(QtWidgets.QMainWindow):
                         warning_msg,
                         QMessageBox.Ok,
                     )
+                if self.dataset.validation_results["category_id_remaps"]:
+                    remaps = self.dataset.validation_results["category_id_remaps"]
+                    answer = QMessageBox.question(
+                        self,
+                        self.tr("Fix Category IDs?"),
+                        self.tr(
+                            f"Category IDs need remapping: {remaps}\n\n"
+                            "Apply the remapping now? "
+                            "The file will be corrected on the next export."
+                        ),
+                        QMessageBox.Yes | QMessageBox.No,
+                        QMessageBox.Yes,
+                    )
+                    if answer == QMessageBox.Yes:
+                        self.dataset._enforce_categories(expected_category_names)
             else:
                 QMessageBox.information(
                     self,
