@@ -77,6 +77,10 @@ The fork inspects the dataset at two points and offers interactive repairs when 
 
 This prevents the same physical object from being silently re-labelled in a single frame.
 
+### Default Label Classes
+
+The shipped `default_config.yaml` defines a starting label list of `Parrotfish` and `Surgeonfish` so the app is immediately usable for the fork's target workflow. Override the list by editing `~/.labelmerc` or by passing `--labels label1,label2,...` (or `--labels labels.txt`) on the command line.
+
 ### Guided Review Mode
 
 Guided Review Mode provides a structured workflow for validating and reviewing annotations. 
