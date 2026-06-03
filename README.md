@@ -92,7 +92,10 @@ Guided Review Mode provides a structured workflow for validating and reviewing a
 
 1. Open a directory containing COCO annotated images
 2. Press `Ctrl+G` or click the button "Guided Review" found in the Tools bar
-3. The review dock widget will appear showing progress and controls
+3. The review dock widget will appear with an info panel showing:
+   - `Frame: <filename> (<index> / <total>)` — the current image and its position in the dataset
+   - `ObjID: <group_id>` — the Object ID of the pair under review
+   - `Label: <label_name>` — its current label
 
 #### Review Workflow
 
