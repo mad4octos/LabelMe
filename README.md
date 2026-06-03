@@ -115,11 +115,11 @@ After reviewing all annotations in a frame:
 
 #### Group ID Validation
 
-Enforce that each `group_id` contains exactly one rectangle and one polygon. When assigning a group ID to a shape, the system validates that:
-- The group doesn't already contain a shape of the same type
-- Each group has at most one bounding box and one polygon
+Each `group_id` represents a single physical object and may contain:
+- **At most one rectangle** (the bounding box).
+- **One or more polygons** — multiple polygons per group are supported for objects whose mask is split into disjoint regions (e.g., an animal partially occluded so one body is visible as two separate areas). The group's bounding box is auto-recomputed to enclose the union of all its polygons.
 
-This ensures proper pairing for the Guided Review workflow.
+When you assign a group ID to a new shape, the system rejects the assignment if it would produce a second rectangle in the same group. This keeps the Guided Review pairing (one bbox + one or more polygons) well-defined.
 
 ### Hard Negative Mining
 
