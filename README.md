@@ -239,7 +239,7 @@ Structure:
   "version": "1.0",
   "frames": {
     "00001.jpg": {
-      "status": "pending",
+      "status": "in_progress",
       "annotations": {
         "1": {
           "status": "confirmed",
@@ -280,7 +280,10 @@ Structure:
 Fields:
 - `version`: Format version for compatibility tracking
 - `frames`: Dictionary mapping image filenames to their review state
-  - `status`: Frame-level status (`"pending"` or `"completed"`)
+  - `status`: Frame-level status — one of:
+    - `"pending"` — frame has been seen but no annotation in it has been reviewed or saved
+    - `"in_progress"` — at least one annotation has been saved or reviewed, but the frame has not been marked complete
+    - `"completed"` — the user has finished reviewing the frame
   - `annotations`: Dictionary mapping group IDs (Object IDs) to their review state
     - `status`: Annotation status (`"pending"`, `"confirmed"`, `"to_edit"`, `"edited"`, or `"deleted"`)
     - `reviewed_at`: ISO 8601 timestamp of when the annotation was last reviewed
