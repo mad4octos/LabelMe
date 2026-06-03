@@ -664,6 +664,62 @@ class LabelFile:
 
         return new_annotations
 
+    @staticmethod
+    def find_label_mismatches(
+        current_frame_shapes: list[dict],
+        current_image_id: int,
+        dataset: LazyCOCODataset,
+    ) -> list[dict]:
+        """Return ObjID/label conflicts between the current frame and other frames.
+
+        Each list entry in the returned list is:
+          {"object_id": int, "current_label": str, "existing_label": str}
+
+        Only the first conflicting label found per ObjID is reported.
+        """
+
+        # Build a mapping between current frame shapes' object_ids and labels
+        current_frame_objid_to_label: dict[int, str] = {}
+        for shape in current_frame_shapes:
+            object_id = shape.get("group_id")
+            shape_type = shape.get("shape_type")
+            if object_id is None or shape_type not in ("polygon", "rectangle"):
+                continue
+
+            # Prefer polygon over rectangle; only set if not already set by a polygon
+            if object_id not in current_frame_objid_to_label or shape_type == "polygon":
+                current_frame_objid_to_label[object_id] = shape["label"]
+
+        # Flag objects whose label in other frames conflicts with the current frame.
+        conflicts: list[dict] = []
+        seen_obj_ids: set[int] = set()
+        for image_id, annotations in dataset.annotations_by_image_id.items():
+            if image_id == current_image_id:
+                continue
+
+            for ann in annotations:
+                object_id = ann.get("attributes", {}).get("ObjID")
+
+                if (
+                    object_id not in current_frame_objid_to_label
+                    or object_id in seen_obj_ids
+                ):
+                    continue
+
+                label = dataset.category_id_to_name.get(ann.get("category_id"), "")
+                current_label = current_frame_objid_to_label[object_id]
+                if label and label != current_label:
+                    conflicts.append(
+                        {
+                            "obj_id": object_id,
+                            "existing_label": label,
+                            "current_label": current_label,
+                        }
+                    )
+                    seen_obj_ids.add(object_id)
+
+        return conflicts
+
     def _sync_labelme_shapes_to_coco_dataset(
         self,
         dataset: LazyCOCODataset,
