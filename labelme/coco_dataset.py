@@ -176,6 +176,25 @@ class LazyCOCODataset:
         image_id = self._images[idx]["id"]
         return self.annotations_by_image_id.get(image_id, [])
 
+    def _clamp_bboxes(self, annotations: list[CocoAnnotation]) -> None:
+        """Clamp all bbox coordinates in-place to their image bounds."""
+        image_wh: dict[int, tuple[int, int]] = {
+            img["id"]: (img["width"], img["height"]) for img in self._images
+        }
+        for ann in annotations:
+            if "bbox" not in ann:
+                continue
+            wh = image_wh.get(ann["image_id"])
+            if wh is None:
+                continue
+            image_width, image_height = float(wh[0]), float(wh[1])
+            x, y, bbox_width, bbox_height = ann["bbox"]
+            x = max(0.0, x)
+            y = max(0.0, y)
+            bbox_width = max(0.0, min(image_width - x, bbox_width))
+            bbox_height = max(0.0, min(image_height - y, bbox_height))
+            ann["bbox"] = [x, y, bbox_width, bbox_height]
+
     def export_annotations(self, output_path: Path | None = None) -> None:
         """
         Export the current dataset to COCO format.
@@ -193,6 +212,8 @@ class LazyCOCODataset:
         all_annotations = []
         for image_id in sorted(self.annotations_by_image_id.keys()):
             all_annotations.extend(self.annotations_by_image_id[image_id])
+
+        self._clamp_bboxes(all_annotations)
 
         coco_export = {
             "images": self._images,
