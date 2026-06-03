@@ -63,6 +63,20 @@ This fork replaces the original Labelme save workflow with a COCO-centric one. T
 **Utility Scripts** ([details](#utility-scripts))
 - Extract image crops and masks from COCO annotations for hard negative training
 
+### Data Integrity Repair Dialogs
+
+The fork inspects the dataset at two points and offers interactive repairs when it finds inconsistencies:
+
+**On load — category-ID mismatches.** The canonical category ID for each label is its 1-indexed position in the configured label list (e.g., `Parrotfish` → 1, `Surgeonfish` → 2). If the loaded COCO file uses different IDs for those labels, a **"Fix Category IDs?"** dialog appears. Confirming remaps every annotation's `category_id` in place and rebuilds the `categories` block so the dataset matches the canonical IDs going forward. Extra categories not present in the config are preserved as-is.
+
+**On save — cross-frame label mismatches.** When you save a frame, the fork checks every `group_id` (Object ID) in that frame against the same Object ID in every other frame. If the same Object ID is associated with a different label elsewhere, a warning dialog lists each conflict and offers three options:
+
+- **Update all frames** — change the label for this Object ID in every frame to match the current one.
+- **Keep current frame only** — save this frame as-is; the other frames are left untouched.
+- **Cancel** — abort the save and return to editing.
+
+This prevents the same physical object from being silently re-labelled in a single frame.
+
 ### Guided Review Mode
 
 Guided Review Mode provides a structured workflow for validating and reviewing annotations. 
