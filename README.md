@@ -11,6 +11,7 @@ This fork extends the original Labelme with enhanced COCO dataset support, a Gui
 - Export annotations to COCO polygon format via **File → Export COCO Annotations** (auto-versioned filenames; see [Saving & Exporting](#saving--exporting))
 - Lazy loading support for large datasets
 - Dataset integrity verification on load
+- Interactive repair dialogs for category-ID and cross-frame label mismatches (see [Data Integrity Repair Dialogs](#data-integrity-repair-dialogs))
 - Ground-truth location overlay: displays ground truth attributes from COCO annotations as circles with metadata labels (location, object ID, extracted frame, original frame). These attributes come from the original .npy annotations file used to create the COCO annotations.
 
 **Saving & Exporting**
@@ -26,6 +27,10 @@ This fork replaces the original Labelme save workflow with a COCO-centric one. T
 | **Export COCO Annotations** | Writes all staged annotations to a COCO JSON file on disk. Run this when you are done editing a session. Pending changes in the current frame are auto-saved before writing, so unstaged edits are not lost. |
 
 **Auto-versioned export filenames.** Each export pre-fills a default path of the form `instances_train_v{N}.json` in the save dialog. The annotations directory is scanned for files matching that pattern and the next available `N` is chosen, so successive exports don't overwrite earlier ones. The base name (`instances_train`) is fixed in the default path; you can still type a different filename in the save dialog before confirming.
+
+**Data Integrity Repair Dialogs** ([details](#data-integrity-repair-dialogs))
+- On load: detect and remap mismatched category IDs against the configured label list
+- On save: detect and resolve cross-frame label conflicts for the same Object ID
 
 **Guided Review Mode** ([details](#guided-review-mode))
 - Review bbox-polygon pairs grouped by Object ID
