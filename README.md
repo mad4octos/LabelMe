@@ -108,6 +108,19 @@ When review mode is active:
   - **Delete** (`Backspace`): Mark as deleted and move to next
   - **Reset Frame** (`R`): Reset all review progress for the current frame
 
+#### Explanation of Confirm/Edit/Delete/Reset
+
+- **Confirm**: Marks the current pair as confirmed and advances. If the pair was previously marked for Edit, Confirm finalizes the edit: the pair's status becomes `edited` and the original (pre-edit) annotation is written to `incorrect_predictions.json` with `rejection_type: "edited"`, provided the post-edit mask differs significantly from the original. Otherwise (a plain `pending → confirmed` confirmation), Confirm just records the status and advances — nothing is written to `incorrect_predictions.json`. Only annotations loaded from the COCO dataset can produce a write; pairs made of shapes you drew yourself in the session have no original to record.
+
+- **Edit**: Marks the current pair as `to_edit` and exits Guided Review so you can adjust the shape directly on the canvas. When you re-enter review and press `C` on the same pair, the status flips to `edited` and — when the change is significant enough — the original (pre-edit) annotation is written to `incorrect_predictions.json` with `rejection_type: "edited"`. As with Confirm, only annotations loaded from the COCO dataset can produce a write. Re-pressing Edit on the same pair before confirming does not overwrite the original baseline that was captured on the first Edit.
+
+- **Delete**: Marks the current pair as `deleted`, advances to the next pair, and writes the original annotation to `incorrect_predictions.json` with `rejection_type: "deleted"`. Only annotations loaded from the COCO dataset are written; deleting a pair you drew yourself in the session removes it from the canvas and advances the review state but does not produce an `incorrect_predictions.json` entry.
+
+- **Reset Frame**: Reset Frame only resets the review progress state (the frame's review entries are wiped and all pairs return to `pending`) so you can iterate through the frame's annotations again. It does **not** touch the annotation data itself:
+  - Edited shape geometry is **not** reverted to its original form.
+  - Deleted shapes are **not** restored — they are removed from the canvas at delete time and reset never re-adds them.
+  - Consequence: an **edit → confirm → reset → confirm** sequence writes the original mask to `incorrect_predictions.json` at most once (on the first `confirm`, when the `to_edit → edited` transition fires, and only if the edit was significant), while the post-edit shape is what gets saved to `instances_train_vN.json` on COCO export. The second `confirm` follows the plain `pending → confirmed` path and does not produce another `incorrect_predictions.json` entry.
+
 #### FAQ
 
 - **When is the `incorrect_predictions.json` file updated?** It is updated immediately on **Delete** (with `rejection_type: "deleted"`) and on **Confirm following an Edit** (with `rejection_type: "edited"`). For edits, the write is skipped if the post-edit mask is not significantly different from the original, so trivially adjusted shapes do not pollute the hard-negative set.
