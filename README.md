@@ -108,6 +108,10 @@ When review mode is active:
   - **Delete** (`Backspace`): Mark as deleted and move to next
   - **Reset Frame** (`R`): Reset all review progress for the current frame
 
+#### FAQ
+
+- **When is the `incorrect_predictions.json` file updated?** It is updated immediately on **Delete** (with `rejection_type: "deleted"`) and on **Confirm following an Edit** (with `rejection_type: "edited"`). For edits, the write is skipped if the post-edit mask is not significantly different from the original, so trivially adjusted shapes do not pollute the hard-negative set.
+
 #### Keyboard Shortcuts
 
 | Action | Shortcut |
