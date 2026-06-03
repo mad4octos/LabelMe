@@ -159,6 +159,8 @@ Review progress is automatically saved to `.labelme_review.json` in the dataset 
 | Confirmed | Reviewed and marked as correct |
 | Deleted | Marked for deletion |
 
+Annotations loaded from the COCO file start as `pending` and are what Guided Review walks you through. Shapes you draw yourself (outside review mode) are recorded as `confirmed` as soon as they receive a group ID, and the enclosing frame moves to `in_progress`. Entering Guided Review on a frame whose annotations are all already confirmed (e.g., a frame whose only shapes were user-drawn) skips straight to the *Frame Completion* dialog.
+
 #### Frame Completion
 
 After reviewing all annotations in a frame:
