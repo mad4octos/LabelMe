@@ -101,7 +101,7 @@ Guided Review Mode provides a structured workflow for validating and reviewing a
 
 When review mode is active:
 - Annotations are grouped by their Object ID (`group_id`)
-- The current annotation pair (bbox + polygon) is highlighted, while other annotations are dimmed
+- The current annotation pair (bbox + polygon) is highlighted, while other annotations are dimmed. The fill opacity used for the focused pair and the hover opacity used for other shapes are tunable via `canvas.review_focus_opacity` (default `0.0`) and `canvas.hover_opacity` (default `0.15`) in the config.
 - For each annotation pair, you can:
   - **Confirm** (`C` or `Enter`): Mark as correct and move to next
   - **Edit** (`E`): Mark the shape as "to edit" and exit review mode. While outside review mode, modify the shape as needed, then re-enter review mode and press `C` to confirm. The shape will then be marked as "edited".
