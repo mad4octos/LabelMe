@@ -282,6 +282,12 @@ output_dir/
 - Validates datasets on load: duplicate IDs, orphan annotations, missing required fields
 - Review state persists to `.labelme_review.json` with immediate saves after each action
 
+**Output Sanitization**
+- Polygon point coordinates are rounded to 3 decimal places on save, suppressing float noise introduced by zoom transforms (e.g., `1.78e-15` → `0.0`). Bbox coordinates derived from polygon points are rounded to integers (0 decimals) at export time
+- Bounding box coordinates are clamped to image bounds during COCO export, so out-of-bounds bboxes never reach the exported file
+- `canvas.bbox_padding` is applied with clamping so the padded rectangle never gets negative coordinates near image edges
+- Annotation IDs are allocated by a single counter starting at `max(existing_ids) + 1`, preventing duplicate IDs when multiple shapes are created in the same save
+
 **Review State File Format**
 
 The `.labelme_review.json` file stores the review progress for each frame and annotation in the dataset. The file is automatically created in the dataset directory when you start a Guided Review session and is updated immediately after each review action.
