@@ -12,6 +12,7 @@ This fork extends the original Labelme with enhanced COCO dataset support, a Gui
 - Lazy loading support for large datasets
 - Dataset integrity verification on load
 - Interactive repair dialogs for category-ID and cross-frame label mismatches (see [Data Integrity Repair Dialogs](#data-integrity-repair-dialogs))
+- Multi-polygon objects: a single `group_id` may contain several polygons (for objects whose mask is split into disjoint regions)
 - Default label classes shipped in config: `Parrotfish`, `Surgeonfish` (override via `~/.labelmerc` or `--labels`)
 - Ground-truth location overlay: displays ground truth attributes from COCO annotations as circles with metadata labels (location, object ID, extracted frame, original frame). These attributes come from the original .npy annotations file used to create the COCO annotations.
 
