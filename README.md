@@ -48,6 +48,9 @@ This fork replaces the original Labelme save workflow with a COCO-centric one. T
 - Auto-centering on selected shapes
 - Shape type indicators in label list
 - Polygon Labels list sorted by label name, then group ID
+- Pan position is preserved when navigating between frames, and per-image zoom restoration is enabled by default.
+- The unsaved-changes prompt (Save / Discard / Cancel) now also fires when navigating between frames via prev/next, not only when clicking another file in the list.
+- Clicking on overlapping shapes selects the polygon in preference to a covering rectangle
 
 **Persistent Polygon Visibility**
 - Unchecking a shape in the Polygon Labels panel hides it across frame switches
