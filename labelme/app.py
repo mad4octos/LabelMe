@@ -2939,6 +2939,10 @@ class MainWindow(QtWidgets.QMainWindow):
             )
             return
 
+        # Save the current frame before exporting so its changes are included
+        if self._is_changed:
+            self.saveFile()
+
         # Ask user for output path, auto-versioned
         caption = self.tr("Export COCO Annotations")
         filters = self.tr("JSON files (*.json)")
