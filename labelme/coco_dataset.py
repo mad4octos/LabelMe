@@ -100,7 +100,12 @@ def extract_labelme_polygons_from_coco_rle_annotation(
 class LazyCOCODataset:
     """ """
 
-    def __init__(self, images_directory_path: Path, annotations_file_path: Path):
+    def __init__(
+        self,
+        images_directory_path: Path,
+        annotations_file_path: Path,
+        expected_category_names: list[str] | None = None,
+    ):
         """ """
         self.images_directory_path = images_directory_path
         self.annotations_file_path = annotations_file_path
@@ -131,8 +136,63 @@ class LazyCOCODataset:
         ]
 
         # Verify dataset integrity at load time
-        self.validation_results = self.verify()
+        self.validation_results = self.verify(expected_category_names)
         self._log_validation_warnings()
+
+    def _build_category_remap(self, expected_labels: list[str]) -> dict[int, int]:
+        """Return a mapping of current category IDs to expected IDs for mismatched
+        categories.
+
+        Returns an empty dict if all category IDs already match the expected labels.
+        """
+        curr_id_to_cat = {cat["id"]: cat["name"] for cat in self.categories}
+        expected_cat_to_id = {cat: i + 1 for i, cat in enumerate(expected_labels)}
+
+        curr_to_expected: dict[int, int] = {}
+        for curr_cat_id, curr_cat_name in curr_id_to_cat.items():
+            if (expected_cat_id := expected_cat_to_id.get(curr_cat_name)) is not None:
+                if curr_cat_id != expected_cat_id:
+                    curr_to_expected[curr_cat_id] = expected_cat_id
+
+        return curr_to_expected
+
+    def _enforce_categories(self, expected_labels: list[str]) -> dict[int, int]:
+        """Normalize categories to match the expected label list.
+
+        Ensures every expected label is present with its canonical ID
+        (1-indexed by position in the config list). Any annotation
+        category_ids that differ from the expected IDs are remapped
+        simultaneously so no intermediate collision can occur.
+        Categories that exist in the file but are not in the config
+        are preserved as-is.
+        """
+        expected_cat_to_id = {cat: i + 1 for i, cat in enumerate(expected_labels)}
+        curr_to_expected = self._build_category_remap(expected_labels)
+
+        if curr_to_expected:
+            for annotations in self.annotations_by_image_id.values():
+                for ann in annotations:
+                    ann["category_id"] = curr_to_expected.get(
+                        ann["category_id"], ann["category_id"]
+                    )
+
+        # Rebuild categories: expected labels first (with canonical IDs),
+        # then any extra categories not in the config
+        expected_names = set(expected_labels)
+        extra_cats = [c for c in self.categories if c["name"] not in expected_names]
+        self.categories = [
+            {"id": new_id, "name": name, "supercategory": ""}
+            for name, new_id in expected_cat_to_id.items()
+        ] + extra_cats
+
+        # Assert unique category names and ids
+        names = [c["name"] for c in self.categories]
+        ids = [c["id"] for c in self.categories]
+        assert len(set(names)) == len(names), f"Duplicate category names: {names}"
+        assert len(set(ids)) == len(ids), f"Duplicate category ids: {ids}"
+
+        return curr_to_expected
+ 
 
     def _log_validation_warnings(self) -> None:
         """Log warnings if validation issues are found."""
@@ -160,6 +220,9 @@ class LazyCOCODataset:
         if self.validation_results["missing_fields"]:
             fields = self.validation_results["missing_fields"]
             messages.append(f"Annotations with missing fields: {fields}")
+        if self.validation_results["category_id_remaps"]:
+            remaps = self.validation_results["category_id_remaps"]
+            messages.append(f"Category IDs need remapping: {remaps}")
         return (
             f"COCO dataset validation failed for "
             f"{self.annotations_file_path}:\n" + "\n".join(messages)
@@ -223,7 +286,7 @@ class LazyCOCODataset:
 
         save_json_file(file_path=output_path, data=coco_export)
 
-    def verify(self) -> dict:
+    def verify(self, expected_category_names: list[str] | None = None) -> dict:
         """
         Verify the COCO dataset for common issues.
 
@@ -236,6 +299,8 @@ class LazyCOCODataset:
             - 'duplicate_image_ids': list of duplicate image IDs
             - 'orphan_annotations': list of annotations with invalid image_id
             - 'missing_fields': list of annotations missing required fields
+            - 'category_id_remaps': dict mapping old category IDs to new ones
+              (empty if no remapping was needed)
         """
         results = {
             "valid": True,
@@ -243,7 +308,13 @@ class LazyCOCODataset:
             "duplicate_image_ids": [],
             "orphan_annotations": [],
             "missing_fields": [],
+            "category_id_remaps": {},
         }
+
+        if expected_category_names:
+            results["category_id_remaps"] = self._build_category_remap(
+                expected_category_names
+            )
 
         annotations = self.coco_data["annotations"]
         images = self.coco_data["images"]
@@ -293,6 +364,7 @@ class LazyCOCODataset:
             or results["duplicate_image_ids"]
             or results["orphan_annotations"]
             or results["missing_fields"]
+            or results["category_id_remaps"]
         ):
             results["valid"] = False
 
