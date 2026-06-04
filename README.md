@@ -8,9 +8,12 @@ This fork extends the original Labelme with enhanced COCO dataset support, a Gui
 
 **COCO Dataset Integration**
 - Import and visualize COCO-format datasets (polygon and RLE formats)
-- Export annotations to COCO polygon format via **File → Export COCO Annotations**
+- Export annotations to COCO polygon format via **File → Export COCO Annotations** (auto-versioned filenames; see [Saving & Exporting](#saving--exporting))
 - Lazy loading support for large datasets
 - Dataset integrity verification on load
+- Interactive repair dialogs for category-ID and cross-frame label mismatches (see [Data Integrity Repair Dialogs](#data-integrity-repair-dialogs))
+- Multi-polygon objects: a single `group_id` may contain several polygons (for objects whose mask is split into disjoint regions)
+- Default label classes shipped in config: `Parrotfish`, `Surgeonfish` (override via `~/.labelmerc` or `--labels`)
 - Ground-truth location overlay: displays ground truth attributes from COCO annotations as circles with metadata labels (location, object ID, extracted frame, original frame). These attributes come from the original .npy annotations file used to create the COCO annotations.
 
 **Saving & Exporting**
@@ -23,7 +26,16 @@ This fork replaces the original Labelme save workflow with a COCO-centric one. T
 | **Save As** | Disabled — it wrote to the original Labelme JSON format, which is not used in the COCO workflow. |
 | **Save Automatically** | Disabled |
 | **Save With Image Data** | Disabled — embedding raw image bytes in the annotations file is not relevant for the COCO workflow. |
-| **Export COCO Annotations** | Writes all staged annotations to a COCO JSON file on disk. Run this when you are done editing a session. |
+| **Export COCO Annotations** | Writes all staged annotations to a COCO JSON file on disk. Run this when you are done editing a session. Pending changes in the current frame are auto-saved before writing, so unstaged edits are not lost. |
+
+**Auto-versioned export filenames.** Each export pre-fills a default path of the form `instances_train_v{N}.json` in the save dialog. The annotations directory is scanned for files matching that pattern and the next available `N` is chosen, so successive exports don't overwrite earlier ones. The base name (`instances_train`) is fixed in the default path; you can still type a different filename in the save dialog before confirming.
+
+**Data Integrity Repair Dialogs** ([details](#data-integrity-repair-dialogs))
+- On load: detect and remap mismatched category IDs against the configured label list
+- On save: detect and resolve cross-frame label conflicts for the same Object ID
+
+**Default Label Classes**
+- `Parrotfish` and `Surgeonfish` are shipped in the default config; override via `~/.labelmerc` or `--labels`
 
 **Guided Review Mode** ([details](#guided-review-mode))
 - Review bbox-polygon pairs grouped by Object ID
@@ -36,6 +48,9 @@ This fork replaces the original Labelme save workflow with a COCO-centric one. T
 - Auto-centering on selected shapes
 - Shape type indicators in label list
 - Polygon Labels list sorted by label name, then group ID
+- Pan position is preserved when navigating between frames, and per-image zoom restoration is enabled by default.
+- The unsaved-changes prompt (Save / Discard / Cancel) now also fires when navigating between frames via prev/next, not only when clicking another file in the list.
+- Clicking on overlapping shapes selects the polygon in preference to a covering rectangle
 
 **Persistent Polygon Visibility**
 - Unchecking a shape in the Polygon Labels panel hides it across frame switches
@@ -51,6 +66,24 @@ This fork replaces the original Labelme save workflow with a COCO-centric one. T
 **Utility Scripts** ([details](#utility-scripts))
 - Extract image crops and masks from COCO annotations for hard negative training
 
+### Data Integrity Repair Dialogs
+
+The fork inspects the dataset at two points and offers interactive repairs when it finds inconsistencies:
+
+**On load — category-ID mismatches.** The canonical category ID for each label is its 1-indexed position in the configured label list (e.g., `Parrotfish` → 1, `Surgeonfish` → 2). If the loaded COCO file uses different IDs for those labels, a **"Fix Category IDs?"** dialog appears. Confirming remaps every annotation's `category_id` in place and rebuilds the `categories` block so the dataset matches the canonical IDs going forward. Extra categories not present in the config are preserved as-is.
+
+**On save — cross-frame label mismatches.** When you save a frame, the fork checks every `group_id` (Object ID) in that frame against the same Object ID in every other frame. If the same Object ID is associated with a different label elsewhere, a warning dialog lists each conflict and offers three options:
+
+- **Update all frames** — change the label for this Object ID in every frame to match the current one.
+- **Keep current frame only** — save this frame as-is; the other frames are left untouched.
+- **Cancel** — abort the save and return to editing.
+
+This prevents the same physical object from being silently re-labelled in a single frame.
+
+### Default Label Classes
+
+The shipped `default_config.yaml` defines a starting label list of `Parrotfish` and `Surgeonfish` so the app is immediately usable for the fork's target workflow. Override the list by editing `~/.labelmerc` or by passing `--labels label1,label2,...` (or `--labels labels.txt`) on the command line.
+
 ### Guided Review Mode
 
 Guided Review Mode provides a structured workflow for validating and reviewing annotations. 
@@ -59,18 +92,38 @@ Guided Review Mode provides a structured workflow for validating and reviewing a
 
 1. Open a directory containing COCO annotated images
 2. Press `Ctrl+G` or click the button "Guided Review" found in the Tools bar
-3. The review dock widget will appear showing progress and controls
+3. The review dock widget will appear with an info panel showing:
+   - `Frame: <filename> (<index> / <total>)` — the current image and its position in the dataset
+   - `ObjID: <group_id>` — the Object ID of the pair under review
+   - `Label: <label_name>` — its current label
 
 #### Review Workflow
 
 When review mode is active:
 - Annotations are grouped by their Object ID (`group_id`)
-- The current annotation pair (bbox + polygon) is highlighted, while other annotations are dimmed
+- The current annotation pair (bbox + polygon) is highlighted, while other annotations are dimmed. The fill opacity used for the focused pair and the hover opacity used for other shapes are tunable via `canvas.review_focus_opacity` (default `0.0`) and `canvas.hover_opacity` (default `0.15`) in the config.
 - For each annotation pair, you can:
   - **Confirm** (`C` or `Enter`): Mark as correct and move to next
   - **Edit** (`E`): Mark the shape as "to edit" and exit review mode. While outside review mode, modify the shape as needed, then re-enter review mode and press `C` to confirm. The shape will then be marked as "edited".
   - **Delete** (`Backspace`): Mark as deleted and move to next
   - **Reset Frame** (`R`): Reset all review progress for the current frame
+
+#### Explanation of Confirm/Edit/Delete/Reset
+
+- **Confirm**: Marks the current pair as confirmed and advances. If the pair was previously marked for Edit, Confirm finalizes the edit: the pair's status becomes `edited` and the original (pre-edit) annotation is written to `incorrect_predictions.json` with `rejection_type: "edited"`, provided the post-edit mask differs significantly from the original. Otherwise (a plain `pending → confirmed` confirmation), Confirm just records the status and advances — nothing is written to `incorrect_predictions.json`. Only annotations loaded from the COCO dataset can produce a write; pairs made of shapes you drew yourself in the session have no original to record.
+
+- **Edit**: Marks the current pair as `to_edit` and exits Guided Review so you can adjust the shape directly on the canvas. When you re-enter review and press `C` on the same pair, the status flips to `edited` and — when the change is significant enough — the original (pre-edit) annotation is written to `incorrect_predictions.json` with `rejection_type: "edited"`. As with Confirm, only annotations loaded from the COCO dataset can produce a write. Re-pressing Edit on the same pair before confirming does not overwrite the original baseline that was captured on the first Edit.
+
+- **Delete**: Marks the current pair as `deleted`, advances to the next pair, and writes the original annotation to `incorrect_predictions.json` with `rejection_type: "deleted"`. Only annotations loaded from the COCO dataset are written; deleting a pair you drew yourself in the session removes it from the canvas and advances the review state but does not produce an `incorrect_predictions.json` entry.
+
+- **Reset Frame**: Reset Frame only resets the review progress state (the frame's review entries are wiped and all pairs return to `pending`) so you can iterate through the frame's annotations again. It does **not** touch the annotation data itself:
+  - Edited shape geometry is **not** reverted to its original form.
+  - Deleted shapes are **not** restored — they are removed from the canvas at delete time and reset never re-adds them.
+  - Consequence: an **edit → confirm → reset → confirm** sequence writes the original mask to `incorrect_predictions.json` at most once (on the first `confirm`, when the `to_edit → edited` transition fires, and only if the edit was significant), while the post-edit shape is what gets saved to `instances_train_vN.json` on COCO export. The second `confirm` follows the plain `pending → confirmed` path and does not produce another `incorrect_predictions.json` entry.
+
+#### FAQ
+
+- **When is the `incorrect_predictions.json` file updated?** It is updated immediately on **Delete** (with `rejection_type: "deleted"`) and on **Confirm following an Edit** (with `rejection_type: "edited"`). For edits, the write is skipped if the post-edit mask is not significantly different from the original, so trivially adjusted shapes do not pollute the hard-negative set.
 
 #### Keyboard Shortcuts
 
@@ -106,6 +159,8 @@ Review progress is automatically saved to `.labelme_review.json` in the dataset 
 | Confirmed | Reviewed and marked as correct |
 | Deleted | Marked for deletion |
 
+Annotations loaded from the COCO file start as `pending` and are what Guided Review walks you through. Shapes you draw yourself (outside review mode) are recorded as `confirmed` as soon as they receive a group ID, and the enclosing frame moves to `in_progress`. Entering Guided Review on a frame whose annotations are all already confirmed (e.g., a frame whose only shapes were user-drawn) skips straight to the *Frame Completion* dialog.
+
 #### Frame Completion
 
 After reviewing all annotations in a frame:
@@ -115,11 +170,11 @@ After reviewing all annotations in a frame:
 
 #### Group ID Validation
 
-Enforce that each `group_id` contains exactly one rectangle and one polygon. When assigning a group ID to a shape, the system validates that:
-- The group doesn't already contain a shape of the same type
-- Each group has at most one bounding box and one polygon
+Each `group_id` represents a single physical object and may contain:
+- **At most one rectangle** (the bounding box).
+- **One or more polygons** — multiple polygons per group are supported for objects whose mask is split into disjoint regions (e.g., an animal partially occluded so one body is visible as two separate areas). The group's bounding box is auto-recomputed to enclose the union of all its polygons.
 
-This ensures proper pairing for the Guided Review workflow.
+When you assign a group ID to a new shape, the system rejects the assignment if it would produce a second rectangle in the same group. This keeps the Guided Review pairing (one bbox + one or more polygons) well-defined.
 
 ### Hard Negative Mining
 
@@ -229,6 +284,12 @@ output_dir/
 - Validates datasets on load: duplicate IDs, orphan annotations, missing required fields
 - Review state persists to `.labelme_review.json` with immediate saves after each action
 
+**Output Sanitization**
+- Polygon point coordinates are rounded to 3 decimal places on save, suppressing float noise introduced by zoom transforms (e.g., `1.78e-15` → `0.0`). Bbox coordinates derived from polygon points are rounded to integers (0 decimals) at export time
+- Bounding box coordinates are clamped to image bounds during COCO export, so out-of-bounds bboxes never reach the exported file
+- `canvas.bbox_padding` is applied with clamping so the padded rectangle never gets negative coordinates near image edges
+- Annotation IDs are allocated by a single counter starting at `max(existing_ids) + 1`, preventing duplicate IDs when multiple shapes are created in the same save
+
 **Review State File Format**
 
 The `.labelme_review.json` file stores the review progress for each frame and annotation in the dataset. The file is automatically created in the dataset directory when you start a Guided Review session and is updated immediately after each review action.
@@ -239,7 +300,7 @@ Structure:
   "version": "1.0",
   "frames": {
     "00001.jpg": {
-      "status": "pending",
+      "status": "in_progress",
       "annotations": {
         "1": {
           "status": "confirmed",
@@ -280,7 +341,10 @@ Structure:
 Fields:
 - `version`: Format version for compatibility tracking
 - `frames`: Dictionary mapping image filenames to their review state
-  - `status`: Frame-level status (`"pending"` or `"completed"`)
+  - `status`: Frame-level status — one of:
+    - `"pending"` — frame has been seen but no annotation in it has been reviewed or saved
+    - `"in_progress"` — at least one annotation has been saved or reviewed, but the frame has not been marked complete
+    - `"completed"` — the user has finished reviewing the frame
   - `annotations`: Dictionary mapping group IDs (Object IDs) to their review state
     - `status`: Annotation status (`"pending"`, `"confirmed"`, `"to_edit"`, `"edited"`, or `"deleted"`)
     - `reviewed_at`: ISO 8601 timestamp of when the annotation was last reviewed
