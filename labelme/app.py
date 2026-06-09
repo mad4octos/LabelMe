@@ -3340,12 +3340,10 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         self._review_manager.set_dataset_dir(self.dataset.annotations_file_path.parent)
-        category_names = {
-            cat["id"]: cat["name"] for cat in self.dataset.categories
-        }
+        
         self._incorrect_predictions = IncorrectPredictionsPersistence(
             self.dataset.annotations_file_path.parent,
-            category_names,
+            self.dataset.category_id_to_name,
             image_id_by_filename=self.dataset.image_id_by_filename,
         )
 
