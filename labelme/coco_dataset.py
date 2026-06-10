@@ -222,6 +222,9 @@ class LazyCOCODataset:
         if self.validation_results["category_id_remaps"]:
             remaps = self.validation_results["category_id_remaps"]
             messages.append(f"Category IDs need remapping: {remaps}")
+        if self.validation_results["missing_categories"]:
+            missing = self.validation_results["missing_categories"]
+            messages.append(f"Missing categories: {missing}")
         return (
             f"COCO dataset validation failed for "
             f"{self.annotations_file_path}:\n" + "\n".join(messages)
@@ -300,6 +303,8 @@ class LazyCOCODataset:
             - 'missing_fields': list of annotations missing required fields
             - 'category_id_remaps': dict mapping old category IDs to new ones
               (empty if no remapping was needed)
+            - 'missing_categories': list of expected category names that are
+              absent from the COCO file (empty if all expected labels exist)
         """
         results = {
             "valid": True,
@@ -308,12 +313,17 @@ class LazyCOCODataset:
             "orphan_annotations": [],
             "missing_fields": [],
             "category_id_remaps": {},
+            "missing_categories": [],
         }
 
         if expected_category_names:
             results["category_id_remaps"] = self._build_category_remap(
                 expected_category_names
             )
+            existing_names = set(self.category_id_to_name.values())
+            results["missing_categories"] = [
+                name for name in expected_category_names if name not in existing_names
+            ]
 
         annotations = self.coco_data["annotations"]
         images = self.coco_data["images"]
@@ -364,6 +374,7 @@ class LazyCOCODataset:
             or results["orphan_annotations"]
             or results["missing_fields"]
             or results["category_id_remaps"]
+            or results["missing_categories"]
         ):
             results["valid"] = False
 
