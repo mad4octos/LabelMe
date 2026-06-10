@@ -3264,14 +3264,21 @@ class MainWindow(QtWidgets.QMainWindow):
                         warning_msg,
                         QMessageBox.Ok,
                     )
-                if self.dataset.validation_results["category_id_remaps"]:
-                    remaps = self.dataset.validation_results["category_id_remaps"]
+                remaps = self.dataset.validation_results["category_id_remaps"]
+                missing = self.dataset.validation_results["missing_categories"]
+                # _enforce_categories handles both remaps and missing categories
+                # in a single pass, so combine them into one prompt.
+                if remaps or missing:
+                    parts = []
+                    if remaps:
+                        parts.append(f"Category IDs need remapping: {remaps}")
+                    if missing:
+                        parts.append(f"Missing categories: {missing}")
                     answer = QMessageBox.question(
                         self,
-                        self.tr("Fix Category IDs?"),
+                        self.tr("Fix Categories?"),
                         self.tr(
-                            f"Category IDs need remapping: {remaps}\n\n"
-                            "Apply the remapping now? "
+                            "\n".join(parts) + "\n\nApply the fix now? "
                             "The file will be corrected on the next export."
                         ),
                         QMessageBox.Yes | QMessageBox.No,
@@ -3340,12 +3347,10 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         self._review_manager.set_dataset_dir(self.dataset.annotations_file_path.parent)
-        category_names = {
-            cat["id"]: cat["name"] for cat in self.dataset.categories
-        }
+        
         self._incorrect_predictions = IncorrectPredictionsPersistence(
             self.dataset.annotations_file_path.parent,
-            category_names,
+            self.dataset.category_id_to_name,
             image_id_by_filename=self.dataset.image_id_by_filename,
         )
 
